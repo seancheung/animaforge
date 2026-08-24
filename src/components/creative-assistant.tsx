@@ -245,6 +245,7 @@ export function CreativeAssistant({
     }: {
       item: AssistantProposalItem;
       decision: "accepted" | "rejected";
+      closeOnSuccess: boolean;
     }) =>
       api(`/api/assistant-proposal-items/${item.id}`, {
         method: "PATCH",
@@ -252,6 +253,7 @@ export function CreativeAssistant({
       }),
     onSuccess: (_result, variables) => {
       client.invalidateQueries({ queryKey });
+      if (variables.closeOnSuccess) setProposalOpen(false);
       if (variables.decision === "accepted") {
         client.invalidateQueries({ queryKey: ["project", projectId] });
         client.invalidateQueries({ queryKey: ["chapter"] });
@@ -278,6 +280,7 @@ export function CreativeAssistant({
         if (decision === "accepted") onApplied?.(item);
       }
     },
+    onSuccess: () => setProposalOpen(false),
     onSettled: (_result, _error, variables) => {
       client.invalidateQueries({ queryKey });
       if (variables.decision === "accepted") {
@@ -764,7 +767,15 @@ export function CreativeAssistant({
             proposal={proposal}
             decidingId={decide.isPending ? decide.variables?.item.id : null}
             bulkDecision={decideAll.isPending ? decideAll.variables?.decision : null}
-            onDecision={(item, decision) => decide.mutate({ item, decision })}
+            onDecision={(item, decision) =>
+              decide.mutate({
+                item,
+                decision,
+                closeOnSuccess:
+                  proposal.items.filter((candidate) => candidate.decision === "pending").length ===
+                  1,
+              })
+            }
             onBulkDecision={(items, decision) => decideAll.mutate({ items, decision })}
             onOpenProposal={openProposal}
           />
@@ -911,27 +922,29 @@ function ProposalReview({
           ))}
         </div>
       </div>
-      <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t px-5 pt-3 pb-4">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={!pendingItems.length || busy}
-          loading={bulkDecision === "rejected"}
-          onClick={() => onBulkDecision(pendingItems, "rejected")}
-        >
-          <X className="size-3.5" />
-          {t("rejectAll")}
-        </Button>
-        <Button
-          size="sm"
-          disabled={!pendingItems.length || busy}
-          loading={bulkDecision === "accepted"}
-          onClick={() => onBulkDecision(pendingItems, "accepted")}
-        >
-          <Check className="size-3.5" />
-          {t("acceptAll")}
-        </Button>
-      </div>
+      {proposal.items.length > 1 ? (
+        <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t px-5 pt-3 pb-4">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!pendingItems.length || busy}
+            loading={bulkDecision === "rejected"}
+            onClick={() => onBulkDecision(pendingItems, "rejected")}
+          >
+            <X className="size-3.5" />
+            {t("rejectAll")}
+          </Button>
+          <Button
+            size="sm"
+            disabled={!pendingItems.length || busy}
+            loading={bulkDecision === "accepted"}
+            onClick={() => onBulkDecision(pendingItems, "accepted")}
+          >
+            <Check className="size-3.5" />
+            {t("acceptAll")}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
