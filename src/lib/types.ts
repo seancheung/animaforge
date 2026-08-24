@@ -20,6 +20,7 @@ export type AssistantAction =
   | "create_character"
   | "update_character"
   | "create_chapter"
+  | "update_chapter_title"
   | "update_chapter_synopsis"
   | "create_text_block"
   | "update_block_synopsis";

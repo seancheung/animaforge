@@ -61,6 +61,12 @@ const proposalItemSchema = z.discriminatedUnion("action", [
     payload: z.object({ title: z.string().min(1), synopsis: z.string().default("") }),
   }),
   z.object({
+    action: z.literal("update_chapter_title"),
+    label: z.string().min(1).max(120),
+    supersedesItemId: z.string().min(1).optional(),
+    payload: z.object({ chapterId: z.string().min(1), title: z.string().min(1) }),
+  }),
+  z.object({
     action: z.literal("update_chapter_synopsis"),
     label: z.string().min(1).max(120),
     supersedesItemId: z.string().min(1).optional(),
@@ -118,7 +124,9 @@ function normalizeProposalPayload(action: unknown, value: unknown) {
     delete payload.character_id;
   }
   if (
-    (action === "update_chapter_synopsis" || action === "create_text_block") &&
+    (action === "update_chapter_title" ||
+      action === "update_chapter_synopsis" ||
+      action === "create_text_block") &&
     payload.chapterId === undefined &&
     payload.chapter_id !== undefined
   ) {
@@ -173,7 +181,9 @@ function toModelProposalPayload(action: unknown, value: unknown) {
     delete payload.characterId;
   }
   if (
-    (action === "update_chapter_synopsis" || action === "create_text_block") &&
+    (action === "update_chapter_title" ||
+      action === "update_chapter_synopsis" ||
+      action === "create_text_block") &&
     payload.chapter_id === undefined &&
     payload.chapterId !== undefined
   ) {
@@ -383,6 +393,7 @@ You must return exactly one valid JSON object and no Markdown fences, with this 
         { "action": "create_character", "label": "Character name", "payload": { "name": "...", "description": "..." } },
         { "action": "update_character", "label": "Character name", "payload": { "character_id": "an existing ID", "name": "optional", "description": "optional" } },
         { "action": "create_chapter", "label": "Chapter title", "payload": { "title": "...", "synopsis": "..." } },
+        { "action": "update_chapter_title", "label": "Chapter title", "payload": { "chapter_id": "an existing ID", "title": "..." } },
         { "action": "update_chapter_synopsis", "label": "Chapter synopsis", "payload": { "chapter_id": "an existing ID", "synopsis": "..." } },
         { "action": "create_text_block", "label": "Text 01", "payload": { "chapter_id": "the active chapter ID", "synopsis": "..." } },
         { "action": "update_block_synopsis", "label": "Text 01", "payload": { "block_id": "an existing text block ID", "synopsis": "..." } }
@@ -397,7 +408,7 @@ Prior proposals include proposal_id, item_id, decision, and revision links. When
 Never invent an ID for update_character; use an ID from the supplied character context.
 For a project outline, create one create_chapter item per chapter. Chapters must contain only a title and synopsis.
 In the chapter workspace, "create an outline" means creating multiple empty Text blocks with a synopsis for each segment. Return one create_text_block item per segment in narrative order. Never put prose content in a create_text_block proposal.
-Chapter-scoped proposals may only target the active chapter. Use update_chapter_synopsis for the chapter synopsis and update_block_synopsis for an existing Text block synopsis.
+Chapter-scoped proposals may only target the active chapter. Use update_chapter_title for the chapter title, update_chapter_synopsis for the chapter synopsis, and update_block_synopsis for an existing Text block synopsis.
 Do not claim that a proposal has already been applied. The user must review it in the application.`;
 
 async function buildAssistantInput(

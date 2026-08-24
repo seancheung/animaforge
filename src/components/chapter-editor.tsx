@@ -805,6 +805,14 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
               embedded
               onApplied={(item) => {
                 if (
+                  item.action === "update_chapter_title" &&
+                  typeof item.payload.title === "string"
+                )
+                  setChapterDraft((current) => ({
+                    title: item.payload.title as string,
+                    synopsis: current?.synopsis ?? chapter.synopsis,
+                  }));
+                if (
                   item.action === "update_chapter_synopsis" &&
                   typeof item.payload.synopsis === "string"
                 )

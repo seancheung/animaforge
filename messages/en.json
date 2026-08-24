@@ -611,9 +611,16 @@
     "viewOriginal": "View original",
     "activity": {
       "get_project_context": "Read project context",
+      "list_chapters": "View chapter list",
+      "get_chapter_synopsis": "Read chapter synopsis",
+      "list_chapter_blocks": "View chapter block list",
       "get_chapter_content": "Read chapter content",
       "get_block_content": "Read block content",
+      "search_chapter_content": "Search chapter content",
+      "list_characters": "View character list",
       "get_character": "Read character profile",
+      "search_characters": "Search character profiles",
+      "list_attachments": "View attachment list",
       "search_project": "Search project resources",
       "read_attachment": "Read attachment"
     },
@@ -622,6 +629,7 @@
       "create_character": "Create character",
       "update_character": "Update existing character",
       "create_chapter": "Create empty chapter",
+      "update_chapter_title": "Update chapter title",
       "update_chapter_synopsis": "Update chapter synopsis",
       "create_text_block": "Create empty Text",
       "update_block_synopsis": "Update Text synopsis"
@@ -821,6 +829,7 @@
     "invalidCharacterProposal": "Invalid character proposal",
     "proposalCharacterNotFound": "The character to update no longer exists",
     "invalidChapterProposal": "Invalid chapter proposal",
+    "invalidChapterTitleProposal": "Invalid chapter-title proposal",
     "invalidChapterSynopsisProposal": "Invalid chapter-synopsis proposal",
     "invalidTextOutlineProposal": "Invalid Text outline proposal",
     "invalidTextSynopsisProposal": "Invalid Text synopsis proposal",

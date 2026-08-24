@@ -180,6 +180,26 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           sort_order: insertAt,
           character_mode: "all",
         });
+      } else if (row.action === "update_chapter_title") {
+        const chapterId =
+          typeof payload.chapterId === "string" ? payload.chapterId : row.context_id;
+        if (
+          !chapterId ||
+          (row.context_id && chapterId !== row.context_id) ||
+          typeof payload.title !== "string"
+        )
+          throw new ApiError("invalidChapterTitleProposal");
+        const chapter = await trx("chapters")
+          .where({ id: chapterId, project_id: row.project_id })
+          .first();
+        if (!chapter) throw new ApiError("chapterNotFound", 404);
+        await trx("chapters")
+          .where({ id: chapterId })
+          .update({
+            title: payload.title.trim() || (await apiDefault("unnamedChapter")),
+            updated_at: trx.fn.now(),
+          });
+        appliedEntityId = chapterId;
       } else if (row.action === "update_chapter_synopsis") {
         const chapterId =
           typeof payload.chapterId === "string" ? payload.chapterId : row.context_id;

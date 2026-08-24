@@ -611,9 +611,16 @@
     "viewOriginal": "查看旧版",
     "activity": {
       "get_project_context": "读取项目上下文",
+      "list_chapters": "查看章节列表",
+      "get_chapter_synopsis": "读取章节梗概",
+      "list_chapter_blocks": "查看章节区块列表",
       "get_chapter_content": "读取章节内容",
       "get_block_content": "读取区块内容",
+      "search_chapter_content": "搜索章节内容",
+      "list_characters": "查看角色列表",
       "get_character": "读取角色资料",
+      "search_characters": "搜索角色资料",
+      "list_attachments": "查看附件列表",
       "search_project": "搜索项目资料",
       "read_attachment": "读取附件"
     },
@@ -622,6 +629,7 @@
       "create_character": "新建角色",
       "update_character": "修改已有角色",
       "create_chapter": "新建空章节",
+      "update_chapter_title": "修改章节标题",
       "update_chapter_synopsis": "修改章节梗概",
       "create_text_block": "新建空 Text",
       "update_block_synopsis": "修改 Text 梗概"
@@ -821,6 +829,7 @@
     "invalidCharacterProposal": "角色提案无效",
     "proposalCharacterNotFound": "要修改的角色不存在",
     "invalidChapterProposal": "章节提案无效",
+    "invalidChapterTitleProposal": "章节标题提案无效",
     "invalidChapterSynopsisProposal": "章节梗概提案无效",
     "invalidTextOutlineProposal": "Text 大纲提案无效",
     "invalidTextSynopsisProposal": "Text 梗概提案无效",

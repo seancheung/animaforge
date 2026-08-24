@@ -431,7 +431,7 @@ export function CreativeAssistant({
                         className="flex items-center gap-1.5 text-[11px] text-zinc-400 leading-5"
                       >
                         <Database className="size-3 shrink-0" />
-                        <span className="truncate">{activityLabel(t, activity.toolName)}</span>
+                        <span className="truncate">{activityLabel(t, activity)}</span>
                       </div>
                     ))}
                   </div>
@@ -495,7 +495,7 @@ export function CreativeAssistant({
                       className="flex items-center gap-1.5 text-[11px] text-zinc-400 leading-5"
                     >
                       <Database className="size-3 shrink-0" />
-                      <span className="truncate">{activityLabel(t, activity.toolName)}</span>
+                      <span className="truncate">{activityLabel(t, activity)}</span>
                     </div>
                   ))}
                 </div>
@@ -963,16 +963,28 @@ function DecisionBadge({ decision }: { decision: AssistantProposalItem["decision
   );
 }
 
-function activityLabel(t: ReturnType<typeof useTranslations<"Assistant">>, toolName: string) {
+function activityLabel(
+  t: ReturnType<typeof useTranslations<"Assistant">>,
+  activity: AssistantToolActivity,
+) {
   const supported = [
     "get_project_context",
+    "list_chapters",
+    "get_chapter_synopsis",
+    "list_chapter_blocks",
     "get_chapter_content",
     "get_block_content",
+    "search_chapter_content",
+    "list_characters",
     "get_character",
+    "search_characters",
+    "list_attachments",
     "search_project",
     "read_attachment",
   ];
-  return supported.includes(toolName) ? t(`activity.${toolName}`) : toolName;
+  return supported.includes(activity.toolName)
+    ? t(`activity.${activity.toolName}`)
+    : activity.label || activity.toolName;
 }
 
 function ProposalPreview({ item }: { item: AssistantProposalItem }) {
@@ -981,6 +993,12 @@ function ProposalPreview({ item }: { item: AssistantProposalItem }) {
     return (
       <div className="mt-3 max-h-52 overflow-y-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700 leading-6">
         {String(payload.value ?? "")}
+      </div>
+    );
+  if (item.action === "update_chapter_title")
+    return (
+      <div className="mt-3 rounded-lg bg-zinc-50 p-3 font-medium text-sm text-zinc-700">
+        {String(payload.title ?? "")}
       </div>
     );
   if (item.action === "create_character" || item.action === "update_character")
