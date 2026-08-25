@@ -36,14 +36,17 @@ import type {
   Project,
   ProjectReview,
   ProjectRevisionDetail,
+  ProjectRevisionSource,
   ProjectRevisionSummary,
   ProjectRevisionWindow,
+  StyleFingerprint,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPayload {
   settings: AppSettings;
   services: LlmService[];
+  styleFingerprints: StyleFingerprint[];
 }
 type ExecutionEvent =
   | {
@@ -82,10 +85,11 @@ export function ProjectRevisionWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [executionOpen, setExecutionOpen] = useState(false);
-  const [revisionSource, setRevisionSource] = useState<"review" | "custom">("review");
+  const [revisionSource, setRevisionSource] = useState<ProjectRevisionSource>("review");
   const [reviewId, setReviewId] = useState("");
   const [revisionName, setRevisionName] = useState("");
   const [createRequirements, setCreateRequirements] = useState("");
+  const [createStyleFingerprintId, setCreateStyleFingerprintId] = useState("");
   const [planModelId, setPlanModelId] = useState("");
   const [executionModelId, setExecutionModelId] = useState("");
   const [requirements, setRequirements] = useState("");
@@ -199,6 +203,7 @@ export function ProjectRevisionWorkspace({
       review ? t("defaultName", { reviewer: review.reviewerName }) : t("customDefaultName"),
     );
     setCreateRequirements("");
+    setCreateStyleFingerprintId("");
     setCreateOpen(true);
   };
 
@@ -207,9 +212,11 @@ export function ProjectRevisionWorkspace({
       api<ProjectRevisionDetail>(`/api/projects/${projectId}/revisions`, {
         method: "POST",
         body: JSON.stringify({
+          sourceType: revisionSource,
           reviewId: revisionSource === "review" ? reviewId : null,
           name: revisionName,
-          requirements: revisionSource === "custom" ? createRequirements : "",
+          requirements: revisionSource === "review" ? "" : createRequirements,
+          styleFingerprintId: revisionSource === "style" ? createStyleFingerprintId || null : null,
         }),
       }),
     onSuccess: async (revision) => {
@@ -494,8 +501,12 @@ export function ProjectRevisionWorkspace({
               <div className="min-w-0">
                 <h2 className="truncate font-semibold text-sm">{activeRevision.name}</h2>
                 <p className="mt-0.5 truncate text-[11px] text-zinc-400">
-                  {activeRevision.reviewerName || t("customRequirements")} ·{" "}
-                  {activeRevision.reviewChapterTitle ?? t("allChapters")} ·{" "}
+                  {activeRevision.sourceType === "review"
+                    ? activeRevision.reviewerName
+                    : activeRevision.sourceType === "style"
+                      ? activeRevision.styleFingerprintName
+                      : t("customRequirements")}{" "}
+                  · {activeRevision.reviewChapterTitle ?? t("allChapters")} ·{" "}
                   {formatDateTime(activeRevision.createdAt, locale)}
                 </p>
               </div>
@@ -644,19 +655,30 @@ export function ProjectRevisionWorkspace({
               <Select
                 value={revisionSource}
                 onChange={(value) => {
-                  const source = value as "review" | "custom";
+                  const source = value as ProjectRevisionSource;
                   setRevisionSource(source);
+                  const fingerprint =
+                    (settings.data?.styleFingerprints ?? []).find(
+                      (candidate) => candidate.id === createStyleFingerprintId,
+                    ) ?? settings.data?.styleFingerprints[0];
                   setRevisionName(
                     source === "custom"
                       ? t("customDefaultName")
-                      : completedReviews[0]
-                        ? t("defaultName", { reviewer: completedReviews[0].reviewerName })
-                        : "",
+                      : source === "style"
+                        ? fingerprint
+                          ? t("styleDefaultName", { fingerprint: fingerprint.name })
+                          : t("styleDefaultNameFallback")
+                        : completedReviews[0]
+                          ? t("defaultName", { reviewer: completedReviews[0].reviewerName })
+                          : "",
                   );
                   if (source === "review" && !reviewId) setReviewId(completedReviews[0]?.id ?? "");
+                  if (source === "style" && !createStyleFingerprintId)
+                    setCreateStyleFingerprintId(fingerprint?.id ?? "");
                 }}
                 options={[
                   { value: "review", label: t("sourceReview") },
+                  { value: "style", label: t("sourceStyle") },
                   { value: "custom", label: t("sourceCustom") },
                 ]}
               />
@@ -683,13 +705,45 @@ export function ProjectRevisionWorkspace({
                   <p className="mt-2 text-amber-600 text-xs">{t("noCompletedReviews")}</p>
                 ) : null}
               </div>
+            ) : revisionSource === "style" ? (
+              <div className="space-y-4">
+                <div>
+                  <Label>{t("styleFingerprint")}</Label>
+                  <Select
+                    value={createStyleFingerprintId}
+                    onChange={(value) => {
+                      setCreateStyleFingerprintId(value);
+                      const fingerprint = settings.data?.styleFingerprints.find(
+                        (candidate) => candidate.id === value,
+                      );
+                      if (fingerprint)
+                        setRevisionName(t("styleDefaultName", { fingerprint: fingerprint.name }));
+                    }}
+                    options={(settings.data?.styleFingerprints ?? []).map((fingerprint) => ({
+                      value: fingerprint.id,
+                      label: fingerprint.name,
+                    }))}
+                    placeholder={t("selectStyleFingerprint")}
+                  />
+                </div>
+                <div>
+                  <Label>{t("styleRewriteInstructions")}</Label>
+                  <Textarea
+                    autoFocus
+                    className="min-h-28"
+                    value={createRequirements}
+                    onChange={(event) => setCreateRequirements(event.target.value)}
+                    placeholder={t("styleRewriteInstructionsPlaceholder")}
+                  />
+                </div>
+              </div>
             ) : (
               <div>
                 <Label>{t("customRequirements")}</Label>
                 <Textarea
                   autoFocus
-                  className="min-h-32"
                   required
+                  className="min-h-32"
                   value={createRequirements}
                   onChange={(event) => setCreateRequirements(event.target.value)}
                   placeholder={t("customRequirementsPlaceholder")}
@@ -713,7 +767,11 @@ export function ProjectRevisionWorkspace({
               type="submit"
               disabled={
                 !revisionName.trim() ||
-                (revisionSource === "review" ? !reviewId : !createRequirements.trim())
+                (revisionSource === "review"
+                  ? !reviewId
+                  : revisionSource === "style"
+                    ? !createStyleFingerprintId
+                    : !createRequirements.trim())
               }
               loading={createRevision.isPending}
             >
@@ -863,6 +921,16 @@ function BlueprintView({ revision }: { revision: ProjectRevisionDetail }) {
         <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600 leading-6">
           {revision.requirements.trim() || t("noRequirements")}
         </p>
+        {revision.styleFingerprintConfig ? (
+          <div className="mt-4 border-zinc-200 border-t pt-4">
+            <h3 className="font-semibold text-xs text-zinc-700">
+              {t("styleRewrite")} · {revision.styleFingerprintName}
+            </h3>
+            <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600 leading-6">
+              {revision.styleFingerprintConfig}
+            </p>
+          </div>
+        ) : null}
       </section>
       <MarkdownContent content={revision.activeBlueprint.content} />
     </div>

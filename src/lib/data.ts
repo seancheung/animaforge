@@ -9,6 +9,7 @@ import type {
   LlmService,
   Project,
   ReviewerPrompt,
+  StyleFingerprint,
   Swipe,
   TaskType,
 } from "@/lib/types";
@@ -53,6 +54,7 @@ export function mapProject(row: Row): Project {
     name: String(row.name),
     synopsis: String(row.synopsis ?? ""),
     proseStyle: String(row.prose_style ?? ""),
+    styleFingerprintId: row.style_fingerprint_id ? String(row.style_fingerprint_id) : null,
     language: String(row.language ?? ""),
     modelOverrides: parseJson<Partial<Record<TaskType, string | null>>>(
       String(row.model_overrides ?? "{}"),
@@ -63,6 +65,31 @@ export function mapProject(row: Row): Project {
     chapterCount: row.chapter_count === undefined ? undefined : Number(row.chapter_count),
     characterCount: row.character_count === undefined ? undefined : Number(row.character_count),
   };
+}
+
+export function mapStyleFingerprint(row: Row): StyleFingerprint {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    config: String(row.config ?? ""),
+    createdAt: timestamp(row.created_at),
+    updatedAt: timestamp(row.updated_at),
+  };
+}
+
+export async function loadStyleFingerprints(): Promise<StyleFingerprint[]> {
+  const conn = await getDb();
+  const rows = (await conn("style_fingerprints").orderBy("updated_at", "desc")) as Row[];
+  return rows.map(mapStyleFingerprint);
+}
+
+export async function loadStyleFingerprint(
+  id: string | null | undefined,
+): Promise<StyleFingerprint | null> {
+  if (!id) return null;
+  const conn = await getDb();
+  const row = (await conn("style_fingerprints").where({ id }).first()) as Row | undefined;
+  return row ? mapStyleFingerprint(row) : null;
 }
 
 export function mapCharacter(row: Row): Character {

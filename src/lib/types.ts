@@ -7,6 +7,7 @@ export type TaskType =
   | "review"
   | "revisionPlan"
   | "revisionExecution"
+  | "styleFingerprint"
   | "translationBlueprint"
   | "translationDraft"
   | "translationProofread"
@@ -32,6 +33,7 @@ export interface Project {
   name: string;
   synopsis: string;
   proseStyle: string;
+  styleFingerprintId: string | null;
   language: string;
   modelOverrides: Partial<Record<TaskType, string | null>>;
   createdAt: string;
@@ -240,6 +242,14 @@ export interface ReviewerPrompt {
   prompt: string;
 }
 
+export interface StyleFingerprint {
+  id: string;
+  name: string;
+  config: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectReview {
   id: string;
   projectId: string;
@@ -265,6 +275,7 @@ export type ProjectRevisionStatus =
   | "execution_failed"
   | "completed";
 export type ProjectRevisionWindowStatus = "pending" | "generating" | "completed" | "failed";
+export type ProjectRevisionSource = "review" | "style" | "custom";
 
 export interface ProjectRevisionBlueprint {
   id: string;
@@ -308,12 +319,16 @@ export interface ProjectRevisionSummary {
   id: string;
   projectId: string;
   reviewId: string | null;
+  sourceType: ProjectRevisionSource;
   name: string;
   sourceProjectName: string;
   reviewerName: string;
   reviewChapterId: string | null;
   reviewChapterTitle: string | null;
   requirements: string;
+  styleFingerprintId: string | null;
+  styleFingerprintName: string;
+  styleFingerprintConfig: string;
   planModelId: string | null;
   executionModelId: string | null;
   /** System window ceiling captured when revision execution first started. */
@@ -380,6 +395,7 @@ export interface CharacterChatDetail extends CharacterChatSummary {
 export interface ChapterDetail {
   chapter: Chapter;
   project: Project;
+  styleFingerprint: StyleFingerprint | null;
   characters: Character[];
   allCharacters: Character[];
   blocks: Block[];

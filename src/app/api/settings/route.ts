@@ -1,13 +1,18 @@
 import { isUiLocale } from "@/i18n/config";
 import { fail, jsonBody, ok } from "@/lib/api";
-import { loadServices, loadSettings, saveSettings } from "@/lib/data";
+import { loadServices, loadSettings, loadStyleFingerprints, saveSettings } from "@/lib/data";
 import type { AppSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    return ok({ settings: await loadSettings(), services: await loadServices() });
+    const [settings, services, styleFingerprints] = await Promise.all([
+      loadSettings(),
+      loadServices(),
+      loadStyleFingerprints(),
+    ]);
+    return ok({ settings, services, styleFingerprints });
   } catch (error) {
     return fail(error);
   }

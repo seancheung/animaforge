@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
+  FileUp,
+  Fingerprint,
   KeyRound,
   MessageSquareQuote,
   Pencil,
@@ -23,6 +25,7 @@ import type {
   LlmService,
   LlmServiceType,
   ReviewerPrompt,
+  StyleFingerprint,
   TaskType,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -30,6 +33,16 @@ import { cn } from "@/lib/utils";
 interface SettingsPayload {
   settings: AppSettings;
   services: LlmService[];
+  styleFingerprints: StyleFingerprint[];
+}
+
+interface FingerprintForm {
+  id: string;
+  name: string;
+  sampleText: string;
+  instructions: string;
+  config: string;
+  fileName: string;
 }
 
 export function SettingsClient({
@@ -61,7 +74,9 @@ export function SettingsClient({
     revisionWindowTokenLimit: null,
     reviewerPrompts: [],
   });
-  const [section, setSection] = useState<"general" | "services" | "tasks" | "prompts">("general");
+  const [section, setSection] = useState<
+    "general" | "services" | "tasks" | "prompts" | "fingerprints"
+  >("general");
   const [serviceOpen, setServiceOpen] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [modelService, setModelService] = useState<string | null>(null);
@@ -90,6 +105,10 @@ export function SettingsClient({
   const [modelForm, setModelForm] = useState(emptyModelForm);
   const [reviewerForm, setReviewerForm] = useState<ReviewerPrompt | null>(null);
   const [reviewerDeleteTarget, setReviewerDeleteTarget] = useState<ReviewerPrompt | null>(null);
+  const [fingerprintForm, setFingerprintForm] = useState<FingerprintForm | null>(null);
+  const [fingerprintDeleteTarget, setFingerprintDeleteTarget] = useState<StyleFingerprint | null>(
+    null,
+  );
   const settingsDirty = useRef(false);
   const settingsVersion = useRef(0);
   const settingsHydrated = useRef(false);
@@ -202,6 +221,48 @@ export function SettingsClient({
     },
     onError: (error) => toast.error(error.message),
   });
+  const extractFingerprint = useMutation({
+    mutationFn: (form: FingerprintForm) =>
+      api<{ config: string }>("/api/style-fingerprints/extract", {
+        method: "POST",
+        body: JSON.stringify({
+          sampleText: form.sampleText,
+          instructions: form.instructions,
+          modelId: draft.taskModels.styleFingerprint || null,
+          outputLanguage: draft.language,
+        }),
+      }),
+    onSuccess: ({ config }) =>
+      setFingerprintForm((current) =>
+        current ? { ...current, config, sampleText: "", instructions: "", fileName: "" } : current,
+      ),
+    onError: (error) => toast.error(error.message),
+  });
+  const saveFingerprint = useMutation({
+    mutationFn: (form: FingerprintForm) =>
+      api<StyleFingerprint>(
+        form.id ? `/api/style-fingerprints/${form.id}` : "/api/style-fingerprints",
+        {
+          method: form.id ? "PATCH" : "POST",
+          body: JSON.stringify({ name: form.name, config: form.config }),
+        },
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["settings"] });
+      setFingerprintForm(null);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const removeFingerprint = useMutation({
+    mutationFn: (fingerprint: StyleFingerprint) =>
+      api(`/api/style-fingerprints/${fingerprint.id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["settings"] });
+      client.invalidateQueries({ queryKey: ["project"] });
+      setFingerprintDeleteTarget(null);
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const taskLabels: Record<TaskType, string> = {
     writing: t("writing"),
@@ -211,6 +272,7 @@ export function SettingsClient({
     review: t("review"),
     revisionPlan: t("revisionPlan"),
     revisionExecution: t("revisionExecution"),
+    styleFingerprint: t("styleFingerprintTask"),
     translationBlueprint: t("translationBlueprint"),
     translationDraft: t("translationDraft"),
     translationProofread: t("translationProofread"),
@@ -225,6 +287,7 @@ export function SettingsClient({
     review: t("reviewDescription"),
     revisionPlan: t("revisionPlanDescription"),
     revisionExecution: t("revisionExecutionDescription"),
+    styleFingerprint: t("styleFingerprintTaskDescription"),
     translationBlueprint: t("translationBlueprintDescription"),
     translationDraft: t("translationDraftDescription"),
     translationProofread: t("translationProofreadDescription"),
@@ -353,6 +416,19 @@ export function SettingsClient({
               >
                 <MessageSquareQuote className="size-4" />
                 {t("promptsNav")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSection("fingerprints")}
+                className={cn(
+                  "focus-ring flex w-full items-center gap-2.5 rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-colors",
+                  section === "fingerprints"
+                    ? "bg-zinc-200/70 font-medium text-zinc-950"
+                    : "text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-950",
+                )}
+              >
+                <Fingerprint className="size-4" />
+                {t("fingerprintsNav")}
               </button>
             </nav>
             <div className="mt-auto flex gap-2 px-3 py-2 text-[11px] text-zinc-400 leading-4">
@@ -581,6 +657,7 @@ export function SettingsClient({
                         "review",
                         "revisionPlan",
                         "revisionExecution",
+                        "styleFingerprint",
                         "translationBlueprint",
                         "translationDraft",
                         "translationProofread",
@@ -651,7 +728,7 @@ export function SettingsClient({
                   </div>
                 </div>
               </>
-            ) : (
+            ) : section === "prompts" ? (
               <>
                 <div className="flex shrink-0 items-center justify-between border-zinc-100 border-b px-6 py-5">
                   <div>
@@ -701,6 +778,82 @@ export function SettingsClient({
                         <MessageSquareQuote className="size-6 text-zinc-300" />
                         <p className="mt-3 font-medium text-sm">{t("noReviewers")}</p>
                         <p className="mt-1 text-xs text-zinc-500">{t("noReviewersDescription")}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex shrink-0 items-center justify-between border-zinc-100 border-b px-6 py-5">
+                  <div>
+                    <h2 className="font-semibold text-base">{t("fingerprintsTitle")}</h2>
+                    <p className="mt-1 text-xs text-zinc-500">{t("fingerprintsDescription")}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      setFingerprintForm({
+                        id: "",
+                        name: "",
+                        sampleText: "",
+                        instructions: "",
+                        config: "",
+                        fileName: "",
+                      })
+                    }
+                  >
+                    <Plus className="size-3.5" />
+                    {t("addFingerprint")}
+                  </Button>
+                </div>
+                <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6">
+                  <div className="divide-y divide-zinc-100">
+                    {(query.data?.styleFingerprints ?? []).map((fingerprint) => (
+                      <div key={fingerprint.id} className="flex items-start gap-4 py-5">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100">
+                          <Fingerprint className="size-4 text-zinc-500" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-medium text-sm">{fingerprint.name}</h3>
+                          <p className="mt-1.5 line-clamp-4 whitespace-pre-wrap text-xs text-zinc-500 leading-5">
+                            {fingerprint.config}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label={common("edit")}
+                            onClick={() =>
+                              setFingerprintForm({
+                                ...fingerprint,
+                                sampleText: "",
+                                instructions: "",
+                                fileName: "",
+                              })
+                            }
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label={common("delete")}
+                            onClick={() => setFingerprintDeleteTarget(fingerprint)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    {!query.isLoading && !query.data?.styleFingerprints.length ? (
+                      <div className="flex min-h-72 flex-col items-center justify-center text-center">
+                        <Fingerprint className="size-6 text-zinc-300" />
+                        <p className="mt-3 font-medium text-sm">{t("noFingerprints")}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {t("noFingerprintsDescription")}
+                        </p>
                       </div>
                     ) : null}
                   </div>
@@ -944,6 +1097,138 @@ export function SettingsClient({
           </div>
         </form>
       </Modal>
+      <Modal
+        open={Boolean(fingerprintForm)}
+        onOpenChange={(open) => {
+          if (!open && !extractFingerprint.isPending && !saveFingerprint.isPending)
+            setFingerprintForm(null);
+        }}
+        title={fingerprintForm?.id ? t("editFingerprintTitle") : t("addFingerprintTitle")}
+        width="max-w-2xl"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (fingerprintForm) saveFingerprint.mutate(fingerprintForm);
+          }}
+        >
+          <div className="scrollbar-thin max-h-[70vh] space-y-4 overflow-y-auto p-5">
+            <div>
+              <Label>{t("fingerprintName")}</Label>
+              <Input
+                autoFocus
+                required
+                value={fingerprintForm?.name ?? ""}
+                onChange={(event) =>
+                  setFingerprintForm((current) =>
+                    current ? { ...current, name: event.target.value } : current,
+                  )
+                }
+                placeholder={t("fingerprintNamePlaceholder")}
+              />
+            </div>
+            {!fingerprintForm?.id ? (
+              <>
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <Label>{t("sampleText")}</Label>
+                    <label className="focus-ring inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100">
+                      <FileUp className="size-3.5" />
+                      {fingerprintForm?.fileName || t("selectTextFile")}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept=".txt,.md,.markdown,text/plain,text/markdown"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (!file) return;
+                          if (!/\.(txt|md|markdown)$/i.test(file.name)) {
+                            toast.error(t("invalidSampleFile"));
+                            return;
+                          }
+                          const sampleText = await file.text();
+                          setFingerprintForm((current) =>
+                            current ? { ...current, sampleText, fileName: file.name } : current,
+                          );
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <Textarea
+                    required={!fingerprintForm?.config}
+                    className="min-h-48"
+                    value={fingerprintForm?.sampleText ?? ""}
+                    onChange={(event) =>
+                      setFingerprintForm((current) =>
+                        current
+                          ? { ...current, sampleText: event.target.value, fileName: "" }
+                          : current,
+                      )
+                    }
+                    placeholder={t("sampleTextPlaceholder")}
+                  />
+                  <p className="mt-1.5 text-xs text-zinc-400">{t("sampleNotSaved")}</p>
+                </div>
+                <div>
+                  <Label>{t("extractionInstructions")}</Label>
+                  <Textarea
+                    className="min-h-24"
+                    value={fingerprintForm?.instructions ?? ""}
+                    onChange={(event) =>
+                      setFingerprintForm((current) =>
+                        current ? { ...current, instructions: event.target.value } : current,
+                      )
+                    }
+                    placeholder={t("extractionInstructionsPlaceholder")}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={extractFingerprint.isPending}
+                    disabled={!fingerprintForm?.sampleText.trim()}
+                    onClick={() => fingerprintForm && extractFingerprint.mutate(fingerprintForm)}
+                  >
+                    <Fingerprint className="size-4" />
+                    {fingerprintForm?.config ? t("extractAgain") : t("extractFingerprint")}
+                  </Button>
+                </div>
+              </>
+            ) : null}
+            {fingerprintForm?.config || fingerprintForm?.id ? (
+              <div>
+                <Label>{t("fingerprintConfig")}</Label>
+                <Textarea
+                  required
+                  className="min-h-64 font-mono text-xs leading-5"
+                  value={fingerprintForm?.config ?? ""}
+                  onChange={(event) =>
+                    setFingerprintForm((current) =>
+                      current ? { ...current, config: event.target.value } : current,
+                    )
+                  }
+                  placeholder={t("fingerprintConfigPlaceholder")}
+                />
+                <p className="mt-1.5 text-xs text-zinc-400">{t("fingerprintConfigDescription")}</p>
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+            <Button type="button" variant="secondary" onClick={() => setFingerprintForm(null)}>
+              {common("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              loading={saveFingerprint.isPending}
+              disabled={!fingerprintForm?.name.trim() || !fingerprintForm?.config.trim()}
+            >
+              {common("save")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
@@ -969,6 +1254,18 @@ export function SettingsClient({
           }));
           setReviewerDeleteTarget(null);
         }}
+      />
+      <ConfirmDialog
+        open={Boolean(fingerprintDeleteTarget)}
+        onOpenChange={(open) => !open && setFingerprintDeleteTarget(null)}
+        title={t("deleteFingerprintTitle")}
+        description={t("deleteFingerprintDescription", {
+          name: fingerprintDeleteTarget?.name ?? "",
+        })}
+        onConfirm={() =>
+          fingerprintDeleteTarget && removeFingerprint.mutate(fingerprintDeleteTarget)
+        }
+        loading={removeFingerprint.isPending}
       />
     </>
   );

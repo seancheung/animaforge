@@ -61,6 +61,7 @@ import type {
   Character,
   LlmService,
   Project,
+  StyleFingerprint,
   TaskType,
   UsageReport,
 } from "@/lib/types";
@@ -93,11 +94,12 @@ interface ProjectDetail {
 interface SettingsPayload {
   settings: AppSettings;
   services: LlmService[];
+  styleFingerprints: StyleFingerprint[];
 }
 type DeleteTarget = { kind: "chapter" | "character"; id: string; name: string };
 type ProjectDraft = Pick<
   Project,
-  "name" | "synopsis" | "proseStyle" | "language" | "modelOverrides"
+  "name" | "synopsis" | "proseStyle" | "styleFingerprintId" | "language" | "modelOverrides"
 >;
 type ProjectView = "overview" | "setup" | "preview" | "chats" | "reviews" | "revisions";
 type SetupSection = "basics" | "characters" | "outline" | "models";
@@ -106,6 +108,7 @@ const emptyDraft: ProjectDraft = {
   name: "",
   synopsis: "",
   proseStyle: "",
+  styleFingerprintId: null,
   language: "",
   modelOverrides: {},
 };
@@ -180,6 +183,7 @@ export function ProjectClient({
       name: project.name,
       synopsis: project.synopsis,
       proseStyle: project.proseStyle,
+      styleFingerprintId: project.styleFingerprintId,
       language: project.language,
       modelOverrides: project.modelOverrides,
     });
@@ -426,6 +430,7 @@ export function ProjectClient({
             initialSection={initialSetupSection}
             draft={projectDraft}
             settings={settings.data?.settings}
+            styleFingerprints={settings.data?.styleFingerprints ?? []}
             modelOptions={modelOptions}
             characters={characters}
             chapters={chapters}
@@ -1202,6 +1207,7 @@ function SetupWorkspace({
   initialSection,
   draft,
   settings,
+  styleFingerprints,
   modelOptions,
   characters,
   chapters,
@@ -1217,6 +1223,7 @@ function SetupWorkspace({
   initialSection: SetupSection;
   draft: ProjectDraft;
   settings?: AppSettings;
+  styleFingerprints: StyleFingerprint[];
   modelOptions: { value: string; label: string; description?: string }[];
   characters: Character[];
   chapters: Chapter[];
@@ -1268,6 +1275,7 @@ function SetupWorkspace({
           <ProjectSettingsForm
             draft={draft}
             settings={settings}
+            styleFingerprints={styleFingerprints}
             onChange={onChange}
             title={t("setupBasicsTitle")}
             description={t("settingsDescription")}
@@ -1305,12 +1313,14 @@ function SetupWorkspace({
 function ProjectSettingsForm({
   draft,
   settings,
+  styleFingerprints,
   onChange,
   title,
   description,
 }: {
   draft: ProjectDraft;
   settings?: AppSettings;
+  styleFingerprints: StyleFingerprint[];
   onChange: (updater: (current: ProjectDraft) => ProjectDraft) => void;
   title: string;
   description: string;
@@ -1347,8 +1357,24 @@ function ProjectSettingsForm({
           </div>
           <div>
             <Label>{t("proseStyle")}</Label>
+            <Select
+              value={draft.styleFingerprintId ?? "none"}
+              onChange={(value) =>
+                onChange((current) => ({
+                  ...current,
+                  styleFingerprintId: value === "none" ? null : value,
+                }))
+              }
+              options={[
+                { value: "none", label: t("noStyleFingerprint") },
+                ...styleFingerprints.map((fingerprint) => ({
+                  value: fingerprint.id,
+                  label: fingerprint.name,
+                })),
+              ]}
+            />
             <Textarea
-              className="min-h-28"
+              className="mt-3 min-h-28"
               value={draft.proseStyle}
               onChange={(event) =>
                 onChange((current) => ({ ...current, proseStyle: event.target.value }))

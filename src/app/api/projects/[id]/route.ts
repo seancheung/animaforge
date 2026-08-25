@@ -105,6 +105,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       name?: string;
       synopsis?: string;
       proseStyle?: string;
+      styleFingerprintId?: string | null;
       language?: string;
       modelOverrides?: Partial<Record<TaskType, string | null>>;
     }>(request);
@@ -114,6 +115,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       update.name = body.name.trim() || (await apiDefault("unnamedProject"));
     if (body.synopsis !== undefined) update.synopsis = body.synopsis;
     if (body.proseStyle !== undefined) update.prose_style = body.proseStyle;
+    if (body.styleFingerprintId !== undefined) {
+      const fingerprintId = body.styleFingerprintId?.trim() || null;
+      if (fingerprintId && !(await conn("style_fingerprints").where({ id: fingerprintId }).first()))
+        throw new ApiError("styleFingerprintNotFound", 404);
+      update.style_fingerprint_id = fingerprintId;
+    }
     if (body.language !== undefined) update.language = body.language.trim();
     if (body.modelOverrides !== undefined)
       update.model_overrides = JSON.stringify(body.modelOverrides);

@@ -3,6 +3,7 @@ import {
   loadBlocks,
   loadServices,
   loadSettings,
+  loadStyleFingerprint,
   mapChapter,
   mapCharacter,
   mapProject,
@@ -27,9 +28,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       chapterRow.character_mode === "selected"
         ? allCharacterRows.filter((character) => characterIds.includes(String(character.id)))
         : allCharacterRows;
+    const project = mapProject(projectRow);
     return ok({
       chapter: mapChapter(chapterRow, characterIds),
-      project: mapProject(projectRow),
+      project,
+      styleFingerprint: await loadStyleFingerprint(project.styleFingerprintId),
       characters: selected.map(mapCharacter),
       allCharacters: allCharacterRows.map(mapCharacter),
       blocks: await loadBlocks(id),

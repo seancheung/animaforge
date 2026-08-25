@@ -6,8 +6,9 @@ import {
   openAiAssistantTools,
   resolveAssistantReferences,
 } from "@/lib/assistant-tools";
-import { loadServices, loadSettings, mapProject } from "@/lib/data";
+import { loadServices, loadSettings, loadStyleFingerprint, mapProject } from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
+import { mergeStyleInstructions } from "@/lib/style-fingerprint";
 import { openAiStreamOptions, TokenUsageTracker } from "@/lib/token-usage";
 import type {
   AssistantAction,
@@ -472,6 +473,7 @@ async function buildAssistantInput(
     context,
   );
   const outputLanguage = project.language || (await loadSettings()).language;
+  const styleFingerprint = await loadStyleFingerprint(project.styleFingerprintId);
 
   return {
     references: explicitReferences.map((reference) => ({
@@ -484,7 +486,7 @@ async function buildAssistantInput(
   <project_id>${escapeXml(project.id)}</project_id>
   <project_name>${escapeXml(project.name)}</project_name>
   <project_synopsis>${escapeXml(project.synopsis)}</project_synopsis>
-  <prose_style>${escapeXml(project.proseStyle)}</prose_style>
+  <prose_style>${escapeXml(mergeStyleInstructions(styleFingerprint, project.proseStyle))}</prose_style>
   ${outputLanguage ? `<output_language>${escapeXml(outputLanguage)}</output_language>` : ""}
 </project>
 <character_index>

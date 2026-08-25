@@ -1,4 +1,4 @@
-import { apiDefault, fail, jsonBody, ok } from "@/lib/api";
+import { ApiError, apiDefault, fail, jsonBody, ok } from "@/lib/api";
 import { mapProject } from "@/lib/data";
 import { getDb, newId } from "@/lib/db";
 
@@ -32,15 +32,23 @@ export async function POST(request: Request) {
       name?: string;
       synopsis?: string;
       proseStyle?: string;
+      styleFingerprintId?: string | null;
       language?: string;
     }>(request);
     const conn = await getDb();
+    const styleFingerprintId = body.styleFingerprintId?.trim() || null;
+    if (
+      styleFingerprintId &&
+      !(await conn("style_fingerprints").where({ id: styleFingerprintId }).first())
+    )
+      throw new ApiError("styleFingerprintNotFound", 404);
     const id = newId();
     await conn("projects").insert({
       id,
       name: body.name?.trim() || (await apiDefault("unnamedProject")),
       synopsis: body.synopsis?.trim() || "",
       prose_style: body.proseStyle?.trim() || "",
+      style_fingerprint_id: styleFingerprintId,
       language: body.language?.trim() || "",
     });
     const row = await conn("projects").where({ id }).first();

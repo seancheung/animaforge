@@ -31,6 +31,7 @@ export function StatisticsClient() {
     review: settings("review"),
     revisionPlan: settings("revisionPlan"),
     revisionExecution: settings("revisionExecution"),
+    styleFingerprint: settings("styleFingerprintTask"),
     translationBlueprint: settings("translationBlueprint"),
     translationDraft: settings("translationDraft"),
     translationProofread: settings("translationProofread"),

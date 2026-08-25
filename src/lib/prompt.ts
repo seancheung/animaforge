@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api";
+import { mergeStyleInstructions } from "@/lib/style-fingerprint";
 import { type Block, type Chapter, type ChapterDetail, getBlockContent } from "@/lib/types";
 
 export interface GenerationOptions {
@@ -86,7 +87,10 @@ export function buildPrompt(
     "<project>",
     element("project_name", detail.project.name),
     element("project_synopsis", detail.project.synopsis),
-    element("prose_style", detail.project.proseStyle),
+    element(
+      "prose_style",
+      mergeStyleInstructions(detail.styleFingerprint, detail.project.proseStyle),
+    ),
     "<characters>",
     ...detail.characters.map((character) =>
       [
