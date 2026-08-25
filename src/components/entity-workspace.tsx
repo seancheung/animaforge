@@ -520,14 +520,16 @@ export function EntityWorkspace({
         open={entityOpen}
         onOpenChange={setEntityOpen}
         title={editingEntity ? t("editEntity") : t("newEntity")}
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             saveEntity.mutate();
           }}
         >
-          <div className="space-y-4 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
               <Label>{t("type")}</Label>
               <Select
@@ -569,7 +571,7 @@ export function EntityWorkspace({
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button type="button" variant="secondary" onClick={() => setEntityOpen(false)}>
               {common("cancel")}
             </Button>
