@@ -416,6 +416,14 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"]',
+        )
+      )
+        return;
       if (event.key.toLowerCase() === "z") {
         event.preventDefault();
         restoreHistory(event.shiftKey ? "redo" : "undo");
