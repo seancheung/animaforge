@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpDown,
   Bot,
+  Download,
   FileUp,
   Fingerprint,
   KeyRound,
@@ -12,6 +14,7 @@ import {
   Server,
   Settings2,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -45,6 +48,23 @@ interface FingerprintForm {
   fileName: string;
 }
 
+interface SettingsImportCandidate {
+  name: string;
+  data: unknown;
+  services: number;
+  models: number;
+  styleFingerprints: number;
+}
+
+interface SettingsImportResult extends SettingsPayload {
+  summary: {
+    services: number;
+    models: number;
+    styleFingerprints: number;
+    secrets: number;
+  };
+}
+
 export function SettingsClient({
   open,
   onOpenChange,
@@ -75,8 +95,10 @@ export function SettingsClient({
     reviewerPrompts: [],
   });
   const [section, setSection] = useState<
-    "general" | "services" | "tasks" | "prompts" | "fingerprints"
+    "general" | "services" | "tasks" | "prompts" | "fingerprints" | "transfer"
   >("general");
+  const [importCandidate, setImportCandidate] = useState<SettingsImportCandidate | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
   const [serviceOpen, setServiceOpen] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [modelService, setModelService] = useState<string | null>(null);
@@ -263,6 +285,91 @@ export function SettingsClient({
     },
     onError: (error) => toast.error(error.message),
   });
+  const exportSettings = useMutation({
+    mutationFn: () => api<unknown>("/api/settings/export"),
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `anima-forge-settings-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success(t("exportSuccess"));
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const importSettings = useMutation({
+    mutationFn: (candidate: SettingsImportCandidate) =>
+      api<SettingsImportResult>("/api/settings/import", {
+        method: "POST",
+        body: JSON.stringify(candidate.data),
+      }),
+    onSuccess: (result) => {
+      const localeChanged = draft.uiLanguage !== result.settings.uiLanguage;
+      settingsDirty.current = false;
+      settingsVersion.current += 1;
+      settingsHydrated.current = true;
+      setDraft(result.settings);
+      client.setQueryData<SettingsPayload>(["settings"], {
+        settings: result.settings,
+        services: result.services,
+        styleFingerprints: result.styleFingerprints,
+      });
+      client.invalidateQueries({ queryKey: ["project"] });
+      setImportCandidate(null);
+      if (importFileRef.current) importFileRef.current.value = "";
+      toast.success(
+        t("importSuccess", {
+          services: result.summary.services,
+          models: result.summary.models,
+          fingerprints: result.summary.styleFingerprints,
+        }),
+      );
+      if (localeChanged) router.refresh();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const selectSettingsImport = async (file: File) => {
+    if (file.size > 2_000_000) {
+      toast.error(t("importTooLarge"));
+      if (importFileRef.current) importFileRef.current.value = "";
+      return;
+    }
+    try {
+      const data = JSON.parse(await file.text()) as Record<string, unknown>;
+      if (
+        data.kind !== "anima-forge-settings" ||
+        data.version !== 1 ||
+        data.includesSecrets !== true
+      ) {
+        throw new Error("invalid");
+      }
+      const services = Array.isArray(data.services) ? data.services : [];
+      const styleFingerprints = Array.isArray(data.styleFingerprints) ? data.styleFingerprints : [];
+      const models = services.reduce(
+        (count, service) =>
+          count +
+          (typeof service === "object" &&
+          service !== null &&
+          Array.isArray((service as { models?: unknown }).models)
+            ? ((service as { models: unknown[] }).models.length ?? 0)
+            : 0),
+        0,
+      );
+      setImportCandidate({
+        name: file.name,
+        data,
+        services: services.length,
+        models,
+        styleFingerprints: styleFingerprints.length,
+      });
+    } catch {
+      toast.error(t("invalidImportFile"));
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
+  };
 
   const taskLabels: Record<TaskType, string> = {
     writing: t("writing"),
@@ -430,6 +537,19 @@ export function SettingsClient({
                 <Fingerprint className="size-4" />
                 {t("fingerprintsNav")}
               </button>
+              <button
+                type="button"
+                onClick={() => setSection("transfer")}
+                className={cn(
+                  "focus-ring flex w-full items-center gap-2.5 rounded-lg border border-transparent px-3 py-2 text-left text-sm transition-colors",
+                  section === "transfer"
+                    ? "bg-zinc-200/70 font-medium text-zinc-950"
+                    : "text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-950",
+                )}
+              >
+                <ArrowUpDown className="size-4" />
+                {t("transferNav")}
+              </button>
             </nav>
             <div className="mt-auto flex gap-2 px-3 py-2 text-[11px] text-zinc-400 leading-4">
               <KeyRound className="mt-0.5 size-3 shrink-0" />
@@ -437,7 +557,77 @@ export function SettingsClient({
             </div>
           </aside>
           <section className="flex min-h-0 min-w-0 flex-col bg-white">
-            {section === "general" ? (
+            {section === "transfer" ? (
+              <>
+                <div className="shrink-0 border-zinc-100 border-b px-6 py-5">
+                  <h2 className="font-semibold text-base">{t("transferTitle")}</h2>
+                  <p className="mt-1 text-xs text-zinc-500">{t("transferDescription")}</p>
+                </div>
+                <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-6">
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-zinc-200 p-5">
+                      <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100">
+                          <Download className="size-4 text-zinc-600" />
+                        </span>
+                        <div>
+                          <h3 className="font-semibold text-sm">{t("exportTitle")}</h3>
+                          <p className="mt-1 text-xs text-zinc-500 leading-5">
+                            {t("exportDescription")}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-5 rounded-lg bg-amber-50 p-3 text-amber-700 text-xs leading-5">
+                        {t("apiKeyExportWarning")}
+                      </p>
+                      <div className="mt-4 flex justify-end">
+                        <Button
+                          onClick={() => exportSettings.mutate()}
+                          loading={exportSettings.isPending}
+                        >
+                          <Download className="size-3.5" />
+                          {t("exportButton")}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-zinc-200 p-5">
+                      <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100">
+                          <Upload className="size-4 text-zinc-600" />
+                        </span>
+                        <div>
+                          <h3 className="font-semibold text-sm">{t("importTitle")}</h3>
+                          <p className="mt-1 text-xs text-zinc-500 leading-5">
+                            {t("importDescription")}
+                          </p>
+                        </div>
+                      </div>
+                      <input
+                        ref={importFileRef}
+                        type="file"
+                        accept=".json,application/json"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void selectSettingsImport(file);
+                        }}
+                      />
+                      <div className="mt-4 flex justify-end">
+                        <Button variant="secondary" onClick={() => importFileRef.current?.click()}>
+                          <Upload className="size-3.5" />
+                          {t("chooseImportFile")}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <p className="px-1 text-[11px] text-zinc-400 leading-5">
+                      {t("transferScopeHint")}
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : section === "general" ? (
               <>
                 <div className="shrink-0 border-zinc-100 border-b px-6 py-5">
                   <h2 className="font-semibold text-base">{t("generalTitle")}</h2>
@@ -862,6 +1052,50 @@ export function SettingsClient({
             )}
           </section>
         </main>
+      </Modal>
+      <Modal
+        open={Boolean(importCandidate)}
+        onOpenChange={(open) => {
+          if (!open && !importSettings.isPending) {
+            setImportCandidate(null);
+            if (importFileRef.current) importFileRef.current.value = "";
+          }
+        }}
+        title={t("confirmImportTitle")}
+        description={t("confirmImportDescription")}
+        width="max-w-md"
+      >
+        <div className="space-y-4 p-5">
+          <div className="rounded-lg bg-zinc-50 p-3">
+            <p className="truncate font-medium text-sm">{importCandidate?.name}</p>
+            <p className="mt-1 text-xs text-zinc-500 leading-5">
+              {t("importSummary", {
+                services: importCandidate?.services ?? 0,
+                models: importCandidate?.models ?? 0,
+                fingerprints: importCandidate?.styleFingerprints ?? 0,
+              })}
+            </p>
+          </div>
+          <p className="text-amber-700 text-xs leading-5">{t("importContainsApiKeys")}</p>
+        </div>
+        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <Button
+            variant="secondary"
+            disabled={importSettings.isPending}
+            onClick={() => {
+              setImportCandidate(null);
+              if (importFileRef.current) importFileRef.current.value = "";
+            }}
+          >
+            {common("cancel")}
+          </Button>
+          <Button
+            loading={importSettings.isPending}
+            onClick={() => importCandidate && importSettings.mutate(importCandidate)}
+          >
+            {t("importButton")}
+          </Button>
+        </div>
       </Modal>
       <Modal
         open={serviceOpen}
