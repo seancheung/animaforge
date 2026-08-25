@@ -59,8 +59,13 @@ export function CreativeAssistant({
   const t = useTranslations("Assistant");
   const client = useQueryClient();
   const quickPrompts: Record<AssistantScope, string[]> = {
-    setup: [t("quickCompleteSetup"), t("quickProjectOutline"), t("quickImproveCharacters")],
-    chapter: [t("quickChapterOutline"), t("quickChapterSynopsis"), t("quickReviewBlocks")],
+    project: [t("quickCompleteSetup"), t("quickProjectOutline"), t("quickImproveEntities")],
+    chapter: [
+      t("quickChapterOutline"),
+      t("quickExtractEntities"),
+      t("quickChapterSynopsis"),
+      t("quickReviewBlocks"),
+    ],
   };
   const targetQuery = `scope=${scope}${contextId ? `&contextId=${encodeURIComponent(contextId)}` : ""}`;
   const queryKey = ["creative-assistant", projectId, scope, contextId ?? ""] as const;
@@ -357,8 +362,8 @@ export function CreativeAssistant({
 
   const selectReference = (resource: AssistantResourceRef) => {
     if (!mention) return;
-    const nextDraft = `${draft.slice(0, mention.start)}${resource.label}${draft.slice(mention.end)}`;
-    const caret = mention.start + resource.label.length;
+    const nextDraft = `${draft.slice(0, mention.start)}${draft.slice(mention.end)}`;
+    const caret = mention.start;
     setDraft(nextDraft);
     setReferences((current) =>
       current.some((item) => item.type === resource.type && item.id === resource.id)
@@ -988,9 +993,12 @@ function activityLabel(
     "get_chapter_content",
     "get_block_content",
     "search_chapter_content",
-    "list_characters",
-    "get_character",
-    "search_characters",
+    "list_entity_types",
+    "list_entities",
+    "get_entity",
+    "search_entities",
+    "list_relations",
+    "get_relation",
     "list_attachments",
     "search_project",
     "read_attachment",
@@ -1001,6 +1009,7 @@ function activityLabel(
 }
 
 function ProposalPreview({ item }: { item: AssistantProposalItem }) {
+  const t = useTranslations("Assistant");
   const payload = item.payload;
   if (item.action === "update_project_field")
     return (
@@ -1014,13 +1023,41 @@ function ProposalPreview({ item }: { item: AssistantProposalItem }) {
         {String(payload.title ?? "")}
       </div>
     );
-  if (item.action === "create_character" || item.action === "update_character")
+  if (item.action === "update_chapter_entities") {
+    const operation =
+      payload.operation === "remove"
+        ? t("chapterEntityOperation.remove")
+        : payload.operation === "replace"
+          ? t("chapterEntityOperation.replace")
+          : t("chapterEntityOperation.add");
+    return (
+      <div className="mt-3 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700">
+        {t("chapterEntitiesPreview", {
+          operation,
+          count: Array.isArray(payload.entityIds) ? payload.entityIds.length : 0,
+        })}
+      </div>
+    );
+  }
+  if (
+    item.action === "create_entity" ||
+    item.action === "update_entity" ||
+    item.action === "create_relation" ||
+    item.action === "update_relation"
+  )
     return (
       <div className="mt-3 rounded-lg bg-zinc-50 p-3">
         <p className="font-medium text-sm">{String(payload.name ?? item.label)}</p>
         <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-600 leading-5">
           {String(payload.description ?? "")}
         </p>
+        {item.action === "create_entity" &&
+        Array.isArray(payload.chapterIds) &&
+        payload.chapterIds.length ? (
+          <p className="mt-2 text-[11px] text-zinc-400">
+            {t("entityChapterLinks", { count: payload.chapterIds.length })}
+          </p>
+        ) : null}
       </div>
     );
   if (
@@ -1039,6 +1076,13 @@ function ProposalPreview({ item }: { item: AssistantProposalItem }) {
       <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-600 leading-5">
         {String(payload.synopsis ?? "")}
       </p>
+      {item.action === "create_chapter" &&
+      Array.isArray(payload.entityIds) &&
+      payload.entityIds.length ? (
+        <p className="mt-2 text-[11px] text-zinc-400">
+          {t("chapterEntityLinks", { count: payload.entityIds.length })}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -14,18 +14,27 @@ export type TaskType =
   | "translationFidelity"
   | "translationPolish";
 export type BlockType = "text" | "checkpoint";
-export type AssistantScope = "setup" | "chapter";
+export type AssistantScope = "project" | "chapter";
 export type AssistantDecision = "pending" | "accepted" | "rejected" | "superseded";
 export type AssistantAction =
   | "update_project_field"
-  | "create_character"
-  | "update_character"
+  | "create_entity"
+  | "update_entity"
+  | "create_relation"
+  | "update_relation"
   | "create_chapter"
   | "update_chapter_title"
   | "update_chapter_synopsis"
+  | "update_chapter_entities"
   | "create_text_block"
   | "update_block_synopsis";
-export type AssistantResourceType = "project" | "chapter" | "block" | "character" | "attachment";
+export type AssistantResourceType =
+  | "project"
+  | "chapter"
+  | "block"
+  | "entity"
+  | "relation"
+  | "attachment";
 export type UiLocale = "en" | "zh-CN";
 
 export interface Project {
@@ -39,14 +48,42 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   chapterCount?: number;
-  characterCount?: number;
+  entityCount?: number;
 }
 
-export interface Character {
+export interface EntityType {
   id: string;
-  projectId: string;
+  projectId: string | null;
+  systemKey: "character" | "location" | "item" | "organization" | "rule" | "other" | null;
   name: string;
   description: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Entity {
+  id: string;
+  projectId: string;
+  typeId: string;
+  type: EntityType;
+  name: string;
+  description: string;
+  alwaysInclude: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type Character = Entity;
+
+export interface EntityRelation {
+  id: string;
+  projectId: string;
+  sourceEntityId: string;
+  targetEntityId: string;
+  name: string;
+  description: string;
+  alwaysInclude: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,8 +94,8 @@ export interface Chapter {
   title: string;
   synopsis: string;
   sortOrder: number;
-  characterMode: "all" | "selected";
-  characterIds: string[];
+  entityMode: "all" | "selected";
+  entityIds: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -354,7 +391,7 @@ export interface ProjectRevisionDetail extends ProjectRevisionSummary {
 export interface CharacterChatContextSettings {
   includeStorySynopsis: boolean;
   chapterIds: string[];
-  characterIds: string[];
+  entityIds: string[];
   preferChapterSynopsis: boolean;
   allowCharacterMentions: boolean;
 }
@@ -396,8 +433,9 @@ export interface ChapterDetail {
   chapter: Chapter;
   project: Project;
   styleFingerprint: StyleFingerprint | null;
-  characters: Character[];
-  allCharacters: Character[];
+  entities: Entity[];
+  allEntities: Entity[];
+  relations: EntityRelation[];
   blocks: Block[];
   settings: AppSettings;
   services: LlmService[];

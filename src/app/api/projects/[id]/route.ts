@@ -1,5 +1,11 @@
 import { ApiError, apiDefault, fail, jsonBody, ok } from "@/lib/api";
-import { mapChapter, mapCharacter, mapProject } from "@/lib/data";
+import {
+  loadEntities,
+  loadEntityRelations,
+  loadEntityTypes,
+  mapChapter,
+  mapProject,
+} from "@/lib/data";
 import { getDb } from "@/lib/db";
 import type { TaskType } from "@/lib/types";
 
@@ -11,13 +17,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const conn = await getDb();
     const row = await conn("projects").where({ id }).first();
     if (!row) throw new ApiError("projectNotFound", 404);
-    const characterRows = await conn("characters")
-      .where({ project_id: id })
-      .orderBy("created_at", "asc");
+    const [entities, entityTypes, relations] = await Promise.all([
+      loadEntities(id),
+      loadEntityTypes(id),
+      loadEntityRelations(id),
+    ]);
     const chapterRows = await conn("chapters")
       .where({ project_id: id })
       .orderBy("sort_order", "asc");
-    const links = await conn("chapter_characters").whereIn(
+    const links = await conn("chapter_entities").whereIn(
       "chapter_id",
       chapterRows.map((chapter) => chapter.id),
     );
@@ -60,18 +68,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     ).length;
     return ok({
       project: mapProject(row),
-      characters: characterRows.map(mapCharacter),
+      entities,
+      entityTypes,
+      relations,
       chapters: chapterRows.map((chapter) =>
         mapChapter(
           chapter,
           links
             .filter((link) => link.chapter_id === chapter.id)
-            .map((link) => String(link.character_id)),
+            .map((link) => String(link.entity_id)),
         ),
       ),
       stats: {
         chapterCount: chapterRows.length,
-        characterCount: characterRows.length,
+        entityCount: entities.length,
         textBlockCount: textBlocks.length,
         checkpointCount: blockRows.filter((block) => block.type === "checkpoint").length,
         staleCheckpointCount: blockRows.filter(

@@ -19,7 +19,7 @@ export function ResizablePanel({
   children,
   className,
 }: {
-  storageKey: "chapter" | "setup-assistant";
+  storageKey: "chapter" | "project-assistant";
   children: ReactNode;
   className?: string;
 }) {

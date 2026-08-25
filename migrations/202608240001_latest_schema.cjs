@@ -1,3 +1,12 @@
+const SYSTEM_ENTITY_TYPES = [
+  ["system-character", "character", "Character", 0],
+  ["system-location", "location", "Location", 1],
+  ["system-item", "item", "Item", 2],
+  ["system-organization", "organization", "Organization", 3],
+  ["system-rule", "rule", "Rule", 4],
+  ["system-other", "other", "Other", 5],
+];
+
 /**
  * Create the complete application schema at its latest state.
  *
@@ -9,6 +18,14 @@ exports.up = async function up(knex) {
     table.timestamp("updated_at").notNullable().defaultTo(knex.fn.now());
   };
 
+  await knex.schema.createTable("style_fingerprints", (table) => {
+    table.text("id").primary();
+    table.text("name").notNullable();
+    table.text("config").notNullable();
+    timestamps(table);
+    table.index("updated_at");
+  });
+
   await knex.schema.createTable("projects", (table) => {
     table.text("id").primary();
     table.text("name").notNullable();
@@ -16,16 +33,55 @@ exports.up = async function up(knex) {
     table.text("prose_style").notNullable().defaultTo("");
     table.text("language").notNullable().defaultTo("");
     table.text("model_overrides").notNullable().defaultTo("{}");
+    table.text("style_fingerprint_id").references("style_fingerprints.id").onDelete("SET NULL");
     timestamps(table);
   });
 
-  await knex.schema.createTable("characters", (table) => {
+  await knex.schema.createTable("entity_types", (table) => {
     table.text("id").primary();
-    table.text("project_id").notNullable().references("projects.id").onDelete("CASCADE");
+    table.text("project_id").references("projects.id").onDelete("CASCADE");
+    table.text("system_key").unique();
     table.text("name").notNullable();
     table.text("description").notNullable().defaultTo("");
+    table.integer("sort_order").notNullable().defaultTo(0);
     timestamps(table);
-    table.index("project_id");
+    table.index(["project_id", "sort_order"]);
+    table.unique(["project_id", "name"]);
+  });
+
+  await knex("entity_types").insert(
+    SYSTEM_ENTITY_TYPES.map(([id, systemKey, name, sortOrder]) => ({
+      id,
+      project_id: null,
+      system_key: systemKey,
+      name,
+      sort_order: sortOrder,
+    })),
+  );
+
+  await knex.schema.createTable("entities", (table) => {
+    table.text("id").primary();
+    table.text("project_id").notNullable().references("projects.id").onDelete("CASCADE");
+    table.text("type_id").notNullable().references("entity_types.id");
+    table.text("name").notNullable();
+    table.text("description").notNullable().defaultTo("");
+    table.integer("always_include").notNullable().defaultTo(0);
+    timestamps(table);
+    table.index(["project_id", "type_id"]);
+    table.index(["project_id", "updated_at"]);
+  });
+
+  await knex.schema.createTable("entity_relations", (table) => {
+    table.text("id").primary();
+    table.text("project_id").notNullable().references("projects.id").onDelete("CASCADE");
+    table.text("source_entity_id").notNullable().references("entities.id").onDelete("CASCADE");
+    table.text("target_entity_id").notNullable().references("entities.id").onDelete("CASCADE");
+    table.text("name").notNullable();
+    table.text("description").notNullable().defaultTo("");
+    table.integer("always_include").notNullable().defaultTo(0);
+    timestamps(table);
+    table.index(["project_id", "source_entity_id"]);
+    table.index(["project_id", "target_entity_id"]);
   });
 
   await knex.schema.createTable("chapters", (table) => {
@@ -34,16 +90,16 @@ exports.up = async function up(knex) {
     table.text("title").notNullable();
     table.text("synopsis").notNullable().defaultTo("");
     table.integer("sort_order").notNullable().defaultTo(0);
-    table.text("character_mode").notNullable().defaultTo("all");
+    table.text("entity_mode").notNullable().defaultTo("selected");
     timestamps(table);
     table.index(["project_id", "sort_order"]);
   });
 
-  await knex.schema.createTable("chapter_characters", (table) => {
+  await knex.schema.createTable("chapter_entities", (table) => {
     table.text("chapter_id").notNullable().references("chapters.id").onDelete("CASCADE");
-    table.text("character_id").notNullable().references("characters.id").onDelete("CASCADE");
-    table.primary(["chapter_id", "character_id"]);
-    table.index("character_id");
+    table.text("entity_id").notNullable().references("entities.id").onDelete("CASCADE");
+    table.primary(["chapter_id", "entity_id"]);
+    table.index("entity_id");
   });
 
   await knex.schema.createTable("blocks", (table) => {
@@ -69,7 +125,7 @@ exports.up = async function up(knex) {
   await knex.schema.createTable("character_chats", (table) => {
     table.text("id").primary();
     table.text("project_id").notNullable().references("projects.id").onDelete("CASCADE");
-    table.text("user_character_id").references("characters.id");
+    table.text("user_entity_id").references("entities.id");
     table.text("member_key").notNullable();
     table.json("context_settings").notNullable().defaultTo("{}");
     timestamps(table);
@@ -79,10 +135,10 @@ exports.up = async function up(knex) {
 
   await knex.schema.createTable("character_chat_members", (table) => {
     table.text("chat_id").notNullable().references("character_chats.id").onDelete("CASCADE");
-    table.text("character_id").notNullable().references("characters.id");
+    table.text("entity_id").notNullable().references("entities.id");
     table.integer("sort_order").notNullable().defaultTo(0);
-    table.primary(["chat_id", "character_id"]);
-    table.index("character_id");
+    table.primary(["chat_id", "entity_id"]);
+    table.index("entity_id");
   });
 
   await knex.schema.createTable("character_chat_sessions", (table) => {
@@ -102,11 +158,11 @@ exports.up = async function up(knex) {
       .references("character_chat_sessions.id")
       .onDelete("CASCADE");
     table.text("role").notNullable();
-    table.text("character_id").references("characters.id");
+    table.text("speaker_entity_id").references("entities.id");
     table.text("content").notNullable();
     table.timestamp("created_at").notNullable().defaultTo(knex.fn.now());
     table.index(["session_id", "created_at"]);
-    table.index("character_id");
+    table.index("speaker_entity_id");
   });
 
   await knex.schema.createTable("llm_services", (table) => {
@@ -243,6 +299,10 @@ exports.up = async function up(knex) {
   await knex.schema.createTable("project_revisions", (table) => {
     table.text("id").primary();
     table.text("project_id").notNullable().references("projects.id").onDelete("CASCADE");
+    table.text("source_type").notNullable().defaultTo("custom");
+    table.text("style_fingerprint_id");
+    table.text("style_fingerprint_name").notNullable().defaultTo("");
+    table.text("style_fingerprint_config").notNullable().defaultTo("");
     table.text("review_id").references("project_reviews.id").onDelete("SET NULL");
     table.text("name").notNullable();
     table.text("source_project_name").notNullable();
@@ -510,8 +570,11 @@ exports.down = async function down(knex) {
   await knex.schema.dropTableIfExists("character_chats");
   await knex.schema.dropTableIfExists("block_swipes");
   await knex.schema.dropTableIfExists("blocks");
-  await knex.schema.dropTableIfExists("chapter_characters");
+  await knex.schema.dropTableIfExists("chapter_entities");
   await knex.schema.dropTableIfExists("chapters");
-  await knex.schema.dropTableIfExists("characters");
+  await knex.schema.dropTableIfExists("entity_relations");
+  await knex.schema.dropTableIfExists("entities");
+  await knex.schema.dropTableIfExists("entity_types");
   await knex.schema.dropTableIfExists("projects");
+  await knex.schema.dropTableIfExists("style_fingerprints");
 };

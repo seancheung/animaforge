@@ -1,11 +1,12 @@
 import { ApiError, fail, jsonBody } from "@/lib/api";
 import {
   loadBlocks,
+  loadEntities,
+  loadEntityRelations,
   loadServices,
   loadSettings,
   loadStyleFingerprint,
   mapChapter,
-  mapCharacter,
   mapProject,
 } from "@/lib/data";
 import { getDb } from "@/lib/db";
@@ -88,22 +89,38 @@ async function chapterDetail(chapterId: string): Promise<ChapterDetail> {
   const chapterRow = await conn("chapters").where({ id: chapterId }).first();
   if (!chapterRow) throw new ApiError("chapterNotFound", 404);
   const projectRow = await conn("projects").where({ id: chapterRow.project_id }).first();
-  const characterRows = await conn("characters")
-    .where({ project_id: chapterRow.project_id })
-    .orderBy("created_at", "asc");
-  const links = await conn("chapter_characters").where({ chapter_id: chapterId });
-  const ids = links.map((link) => String(link.character_id));
-  const characters =
-    chapterRow.character_mode === "selected"
-      ? characterRows.filter((row) => ids.includes(String(row.id)))
-      : characterRows;
+  const [allEntities, allRelations, links] = await Promise.all([
+    loadEntities(String(chapterRow.project_id)),
+    loadEntityRelations(String(chapterRow.project_id)),
+    conn("chapter_entities").where({ chapter_id: chapterId }),
+  ]);
+  const ids = links.map((link) => String(link.entity_id));
+  const contextIds = new Set(
+    allEntities
+      .filter(
+        (entity) =>
+          entity.alwaysInclude || chapterRow.entity_mode === "all" || ids.includes(entity.id),
+      )
+      .map((entity) => entity.id),
+  );
+  const relations = allRelations.filter(
+    (relation) =>
+      relation.alwaysInclude ||
+      contextIds.has(relation.sourceEntityId) ||
+      contextIds.has(relation.targetEntityId),
+  );
+  relations.forEach((relation) => {
+    contextIds.add(relation.sourceEntityId);
+    contextIds.add(relation.targetEntityId);
+  });
   const project = mapProject(projectRow);
   return {
     chapter: mapChapter(chapterRow, ids),
     project,
     styleFingerprint: await loadStyleFingerprint(project.styleFingerprintId),
-    characters: characters.map(mapCharacter),
-    allCharacters: characterRows.map(mapCharacter),
+    entities: allEntities.filter((entity) => contextIds.has(entity.id)),
+    allEntities,
+    relations,
     blocks: await loadBlocks(chapterId),
     settings: await loadSettings(),
     services: await loadServices(),

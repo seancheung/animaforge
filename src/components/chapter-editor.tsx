@@ -68,7 +68,7 @@ import {
   type Block,
   type BlockType,
   type ChapterDetail,
-  type Character,
+  type Entity,
   getBlockContent,
   type TaskType,
 } from "@/lib/types";
@@ -146,9 +146,9 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
   );
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
   const [generation, setGeneration] = useState<GenerateTarget | null>(null);
-  const [characterDialogOpen, setCharacterDialogOpen] = useState(false);
-  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
-  const [characterForm, setCharacterForm] = useState({ name: "", description: "" });
+  const [entityDialogOpen, setEntityDialogOpen] = useState(false);
+  const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
+  const [entityForm, setEntityForm] = useState({ name: "", description: "" });
   const [synopsisBlock, setSynopsisBlock] = useState<Block | null>(null);
   const [deleteBlock, setDeleteBlock] = useState<Block | null>(null);
   const [deleteSwipe, setDeleteSwipe] = useState<{ block: Block; swipeId: string } | null>(null);
@@ -286,14 +286,14 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
       toast.error(error.message);
     },
   });
-  const updateCharacter = useMutation({
+  const updateEntity = useMutation({
     mutationFn: () =>
-      api<Character>(`/api/characters/${editingCharacter?.id}`, {
+      api<Entity>(`/api/entities/${editingEntity?.id}`, {
         method: "PATCH",
-        body: JSON.stringify(characterForm),
+        body: JSON.stringify(entityForm),
       }),
     onSuccess: () => {
-      setEditingCharacter(null);
+      setEditingEntity(null);
       refresh();
     },
     onError: (error) => toast.error(error.message),
@@ -728,38 +728,38 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold text-xs text-zinc-400 uppercase tracking-wider">
                   <Users className="size-3.5" />
-                  {t("relatedCharacters")}
+                  {t("relatedEntities")}
                 </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setCharacterDialogOpen(true)}
-                  aria-label={t("editRelatedCharacters")}
+                  onClick={() => setEntityDialogOpen(true)}
+                  aria-label={t("editRelatedEntities")}
                 >
                   <Pencil className="size-3.5" />
                 </Button>
               </div>
-              {currentDetail.characters.length ? (
+              {currentDetail.entities.length ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {currentDetail.characters.map((character) => (
+                  {currentDetail.entities.map((entity) => (
                     <button
-                      key={character.id}
+                      key={entity.id}
                       type="button"
                       onClick={() => {
-                        setEditingCharacter(character);
-                        setCharacterForm({
-                          name: character.name,
-                          description: character.description,
+                        setEditingEntity(entity);
+                        setEntityForm({
+                          name: entity.name,
+                          description: entity.description,
                         });
                       }}
                       className="focus-ring max-w-full truncate rounded-md bg-zinc-100 px-2 py-1 font-medium text-xs text-zinc-700 hover:bg-zinc-200"
                     >
-                      {character.name}
+                      {entity.name}
                     </button>
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-zinc-400">{t("noRelatedCharacters")}</p>
+                <p className="text-xs text-zinc-400">{t("noRelatedEntities")}</p>
               )}
             </div>
             <div className="mt-5 border-zinc-100 border-t pt-5">
@@ -827,42 +827,42 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
         )}
       </ResizablePanel>
       <Modal
-        open={characterDialogOpen}
-        onOpenChange={setCharacterDialogOpen}
-        title={t("relatedCharactersTitle")}
+        open={entityDialogOpen}
+        onOpenChange={setEntityDialogOpen}
+        title={t("relatedEntitiesTitle")}
         width="max-w-md"
       >
         <div className="space-y-5 p-5">
           <Switch
-            checked={chapter.characterMode === "all"}
+            checked={chapter.entityMode === "all"}
             onChange={(checked) =>
               updateChapter.mutate({
-                characterMode: checked ? "all" : "selected",
-                characterIds: chapter.characterIds,
+                entityMode: checked ? "all" : "selected",
+                entityIds: chapter.entityIds,
               })
             }
-            label={t("allCharacters")}
-            description={t("allCharactersDescription")}
+            label={t("allEntities")}
+            description={t("allEntitiesDescription")}
           />
           <div className="border-zinc-100 border-t pt-4">
             <p className="mb-3 font-semibold text-xs text-zinc-400 uppercase tracking-wider">
-              {t("selectCharacters")}
+              {t("selectEntities")}
             </p>
-            {currentDetail.allCharacters.length ? (
+            {currentDetail.allEntities.length ? (
               <div className="space-y-1.5">
-                {currentDetail.allCharacters.map((character) => {
+                {currentDetail.allEntities.map((entity) => {
                   const checked =
-                    chapter.characterMode === "all" || chapter.characterIds.includes(character.id);
+                    chapter.entityMode === "all" || chapter.entityIds.includes(entity.id);
                   return (
                     <button
-                      key={character.id}
+                      key={entity.id}
                       type="button"
-                      disabled={chapter.characterMode === "all" || updateChapter.isPending}
+                      disabled={chapter.entityMode === "all" || updateChapter.isPending}
                       onClick={() => {
                         const ids = checked
-                          ? chapter.characterIds.filter((id) => id !== character.id)
-                          : [...chapter.characterIds, character.id];
-                        updateChapter.mutate({ characterMode: "selected", characterIds: ids });
+                          ? chapter.entityIds.filter((id) => id !== entity.id)
+                          : [...chapter.entityIds, entity.id];
+                        updateChapter.mutate({ entityMode: "selected", entityIds: ids });
                       }}
                       className="focus-ring flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-zinc-50 disabled:cursor-default disabled:opacity-50"
                     >
@@ -876,54 +876,54 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
                       >
                         {checked ? <Check className="size-3" /> : null}
                       </span>
-                      <span className="min-w-0 truncate font-medium">{character.name}</span>
+                      <span className="min-w-0 truncate font-medium">{entity.name}</span>
                     </button>
                   );
                 })}
               </div>
             ) : (
               <p className="rounded-lg border border-zinc-200 border-dashed px-4 py-10 text-center text-sm text-zinc-400">
-                {t("noProjectCharacters")}
+                {t("noProjectEntities")}
               </p>
             )}
           </div>
         </div>
       </Modal>
       <Modal
-        open={Boolean(editingCharacter)}
+        open={Boolean(editingEntity)}
         onOpenChange={(open) => {
-          if (!open && !updateCharacter.isPending) setEditingCharacter(null);
+          if (!open && !updateEntity.isPending) setEditingEntity(null);
         }}
-        title={t("editCharacter")}
-        description={t("editCharacterDescription")}
+        title={t("editEntity")}
+        description={t("editEntityDescription")}
       >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (editingCharacter) updateCharacter.mutate();
+            if (editingEntity) updateEntity.mutate();
           }}
         >
           <div className="space-y-4 p-5">
             <div>
-              <Label>{t("characterName")}</Label>
+              <Label>{t("entityName")}</Label>
               <Input
                 autoFocus
                 required
-                value={characterForm.name}
+                value={entityForm.name}
                 onChange={(event) =>
-                  setCharacterForm((current) => ({ ...current, name: event.target.value }))
+                  setEntityForm((current) => ({ ...current, name: event.target.value }))
                 }
               />
             </div>
             <div>
-              <Label>{t("characterDescription")}</Label>
+              <Label>{t("entityDescription")}</Label>
               <Textarea
                 className="min-h-40"
-                value={characterForm.description}
+                value={entityForm.description}
                 onChange={(event) =>
-                  setCharacterForm((current) => ({ ...current, description: event.target.value }))
+                  setEntityForm((current) => ({ ...current, description: event.target.value }))
                 }
-                placeholder={t("characterDescriptionPlaceholder")}
+                placeholder={t("entityDescriptionPlaceholder")}
               />
             </div>
           </div>
@@ -931,13 +931,13 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
             <Button
               type="button"
               variant="secondary"
-              disabled={updateCharacter.isPending}
-              onClick={() => setEditingCharacter(null)}
+              disabled={updateEntity.isPending}
+              onClick={() => setEditingEntity(null)}
             >
               {common("cancel")}
             </Button>
-            <Button type="submit" loading={updateCharacter.isPending}>
-              {t("saveCharacter")}
+            <Button type="submit" loading={updateEntity.isPending}>
+              {t("saveEntity")}
             </Button>
           </div>
         </form>
@@ -1496,8 +1496,8 @@ function ContextList({ detail, selected }: { detail: ChapterDetail; selected?: B
       warning: !(detail.project.synopsis || detail.project.proseStyle),
     },
     {
-      label: t("relatedCharacters"),
-      value: t("peopleCount", { count: detail.characters.length }),
+      label: t("relatedEntities"),
+      value: t("entityCount", { count: detail.entities.length }),
       warning: false,
     },
     {
@@ -1704,7 +1704,7 @@ function GenerationDialog({
   ) => t(`${scope}Preview.${mode}`);
   const contextItems = [
     t("projectInfo"),
-    t("relatedCharactersCount", { count: detail.characters.length }),
+    t("relatedEntitiesCount", { count: detail.entities.length }),
     ...(detail.project.language.trim() || detail.settings.language.trim()
       ? [t("outputLanguage")]
       : []),

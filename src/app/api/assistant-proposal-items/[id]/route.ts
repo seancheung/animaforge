@@ -124,29 +124,146 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           .where({ id: row.project_id })
           .update({ [fieldMap[field]]: value, updated_at: trx.fn.now() });
         appliedEntityId = row.project_id;
-      } else if (row.action === "create_character") {
-        if (typeof payload.name !== "string") throw new ApiError("invalidCharacterProposal");
+      } else if (row.action === "create_entity") {
+        if (typeof payload.name !== "string" || typeof payload.typeId !== "string")
+          throw new ApiError("invalidEntityProposal");
+        if (
+          payload.chapterIds !== undefined &&
+          (!Array.isArray(payload.chapterIds) ||
+            payload.chapterIds.some((chapterId) => typeof chapterId !== "string"))
+        )
+          throw new ApiError("invalidChapterEntitiesProposal");
+        const chapterIds = [
+          ...new Set((Array.isArray(payload.chapterIds) ? payload.chapterIds : []) as string[]),
+        ];
+        if (row.context_id && chapterIds.some((chapterId) => chapterId !== row.context_id))
+          throw new ApiError("invalidChapterEntitiesProposal");
+        const chapters = chapterIds.length
+          ? await trx("chapters").where({ project_id: row.project_id }).whereIn("id", chapterIds)
+          : [];
+        if (chapters.length !== chapterIds.length) throw new ApiError("chapterNotFound", 404);
+        const type = await trx("entity_types")
+          .where({ id: payload.typeId })
+          .andWhere((builder) =>
+            builder.whereNull("project_id").orWhere({ project_id: row.project_id }),
+          )
+          .first();
+        if (!type) throw new ApiError("entityTypeNotFound", 404);
         appliedEntityId = newId();
-        await trx("characters").insert({
+        await trx("entities").insert({
           id: appliedEntityId,
           project_id: row.project_id,
-          name: payload.name.trim() || (await apiDefault("unnamedCharacter")),
+          type_id: type.id,
+          name: payload.name.trim() || (await apiDefault("unnamedEntity")),
           description: typeof payload.description === "string" ? payload.description : "",
+          always_include: payload.alwaysInclude === true ? 1 : 0,
         });
-      } else if (row.action === "update_character") {
-        const characterId = typeof payload.characterId === "string" ? payload.characterId : "";
-        const character = await trx("characters")
-          .where({ id: characterId, project_id: row.project_id })
+        if (chapterIds.length)
+          await trx("chapter_entities").insert(
+            chapterIds.map((chapterId) => ({ chapter_id: chapterId, entity_id: appliedEntityId })),
+          );
+      } else if (row.action === "update_entity") {
+        const entityId = typeof payload.entityId === "string" ? payload.entityId : "";
+        const entity = await trx("entities")
+          .where({ id: entityId, project_id: row.project_id })
           .first();
-        if (!character) throw new ApiError("proposalCharacterNotFound", 404);
+        if (!entity) throw new ApiError("entityNotFound", 404);
         const update: Record<string, unknown> = { updated_at: trx.fn.now() };
         if (typeof payload.name === "string")
-          update.name = payload.name.trim() || (await apiDefault("unnamedCharacter"));
+          update.name = payload.name.trim() || (await apiDefault("unnamedEntity"));
         if (typeof payload.description === "string") update.description = payload.description;
-        await trx("characters").where({ id: characterId }).update(update);
-        appliedEntityId = characterId;
+        if (typeof payload.alwaysInclude === "boolean")
+          update.always_include = payload.alwaysInclude ? 1 : 0;
+        if (typeof payload.typeId === "string") {
+          const type = await trx("entity_types")
+            .where({ id: payload.typeId })
+            .andWhere((builder) =>
+              builder.whereNull("project_id").orWhere({ project_id: row.project_id }),
+            )
+            .first();
+          if (!type) throw new ApiError("entityTypeNotFound", 404);
+          if (
+            entity.type_id === "system-character" &&
+            type.id !== "system-character" &&
+            ((await trx("character_chat_members").where({ entity_id: entityId }).first()) ||
+              (await trx("character_chats").where({ user_entity_id: entityId }).first()))
+          )
+            throw new ApiError("entityInChat");
+          update.type_id = type.id;
+        }
+        await trx("entities").where({ id: entityId }).update(update);
+        appliedEntityId = entityId;
+      } else if (row.action === "create_relation") {
+        if (
+          typeof payload.sourceEntityId !== "string" ||
+          typeof payload.targetEntityId !== "string" ||
+          typeof payload.name !== "string"
+        )
+          throw new ApiError("invalidEntityRelation");
+        if (payload.sourceEntityId === payload.targetEntityId)
+          throw new ApiError("selfEntityRelation");
+        const endpoints = await trx("entities")
+          .where({ project_id: row.project_id })
+          .whereIn("id", [payload.sourceEntityId, payload.targetEntityId]);
+        if (endpoints.length !== 2) throw new ApiError("entityNotFound", 404);
+        appliedEntityId = newId();
+        await trx("entity_relations").insert({
+          id: appliedEntityId,
+          project_id: row.project_id,
+          source_entity_id: payload.sourceEntityId,
+          target_entity_id: payload.targetEntityId,
+          name: payload.name.trim(),
+          description: typeof payload.description === "string" ? payload.description : "",
+          always_include: payload.alwaysInclude === true ? 1 : 0,
+        });
+      } else if (row.action === "update_relation") {
+        const relationId = typeof payload.relationId === "string" ? payload.relationId : "";
+        const relation = await trx("entity_relations")
+          .where({ id: relationId, project_id: row.project_id })
+          .first();
+        if (!relation) throw new ApiError("entityRelationNotFound", 404);
+        const sourceId =
+          typeof payload.sourceEntityId === "string"
+            ? payload.sourceEntityId
+            : String(relation.source_entity_id);
+        const targetId =
+          typeof payload.targetEntityId === "string"
+            ? payload.targetEntityId
+            : String(relation.target_entity_id);
+        if (sourceId === targetId) throw new ApiError("selfEntityRelation");
+        const endpoints = await trx("entities")
+          .where({ project_id: row.project_id })
+          .whereIn("id", [sourceId, targetId]);
+        if (endpoints.length !== 2) throw new ApiError("entityNotFound", 404);
+        const update: Record<string, unknown> = { updated_at: trx.fn.now() };
+        if (typeof payload.sourceEntityId === "string")
+          update.source_entity_id = payload.sourceEntityId;
+        if (typeof payload.targetEntityId === "string")
+          update.target_entity_id = payload.targetEntityId;
+        if (typeof payload.name === "string") {
+          if (!payload.name.trim()) throw new ApiError("invalidEntityRelation");
+          update.name = payload.name.trim();
+        }
+        if (typeof payload.description === "string") update.description = payload.description;
+        if (typeof payload.alwaysInclude === "boolean")
+          update.always_include = payload.alwaysInclude ? 1 : 0;
+        await trx("entity_relations").where({ id: relationId }).update(update);
+        appliedEntityId = relationId;
       } else if (row.action === "create_chapter") {
         if (typeof payload.title !== "string") throw new ApiError("invalidChapterProposal");
+        if (
+          payload.entityIds !== undefined &&
+          (!Array.isArray(payload.entityIds) ||
+            payload.entityIds.some((entityId) => typeof entityId !== "string"))
+        )
+          throw new ApiError("invalidChapterEntitiesProposal");
+        const entityIds = [
+          ...new Set((Array.isArray(payload.entityIds) ? payload.entityIds : []) as string[]),
+        ];
+        const entities = entityIds.length
+          ? await trx("entities").where({ project_id: row.project_id }).whereIn("id", entityIds)
+          : [];
+        if (entities.length !== entityIds.length) throw new ApiError("entityNotFound", 404);
         const { previous, next } = await findAcceptedRevisionSiblings("create_chapter");
         const previousChapter = previous
           ? await trx("chapters")
@@ -178,8 +295,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           title: payload.title.trim() || (await apiDefault("unnamedChapter")),
           synopsis: typeof payload.synopsis === "string" ? payload.synopsis : "",
           sort_order: insertAt,
-          character_mode: "all",
+          entity_mode: "selected",
         });
+        if (entityIds.length)
+          await trx("chapter_entities").insert(
+            entityIds.map((entityId) => ({
+              chapter_id: appliedEntityId,
+              entity_id: entityId,
+            })),
+          );
       } else if (row.action === "update_chapter_title") {
         const chapterId =
           typeof payload.chapterId === "string" ? payload.chapterId : row.context_id;
@@ -216,6 +340,46 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         await trx("chapters")
           .where({ id: chapterId })
           .update({ synopsis: payload.synopsis, updated_at: trx.fn.now() });
+        appliedEntityId = chapterId;
+      } else if (row.action === "update_chapter_entities") {
+        const chapterId =
+          typeof payload.chapterId === "string" ? payload.chapterId : row.context_id;
+        if (
+          !chapterId ||
+          (row.context_id && chapterId !== row.context_id) ||
+          !Array.isArray(payload.entityIds) ||
+          payload.entityIds.some((entityId) => typeof entityId !== "string") ||
+          !["add", "remove", "replace"].includes(String(payload.operation)) ||
+          (payload.entityMode !== undefined &&
+            payload.entityMode !== "all" &&
+            payload.entityMode !== "selected")
+        )
+          throw new ApiError("invalidChapterEntitiesProposal");
+        const chapter = await trx("chapters")
+          .where({ id: chapterId, project_id: row.project_id })
+          .first();
+        if (!chapter) throw new ApiError("chapterNotFound", 404);
+        const entityIds = [...new Set(payload.entityIds as string[])];
+        const entities = entityIds.length
+          ? await trx("entities").where({ project_id: row.project_id }).whereIn("id", entityIds)
+          : [];
+        if (entities.length !== entityIds.length) throw new ApiError("entityNotFound", 404);
+        if (payload.entityMode !== undefined)
+          await trx("chapters")
+            .where({ id: chapterId })
+            .update({ entity_mode: payload.entityMode, updated_at: trx.fn.now() });
+        if (payload.operation === "replace")
+          await trx("chapter_entities").where({ chapter_id: chapterId }).delete();
+        if (payload.operation === "remove" && entityIds.length)
+          await trx("chapter_entities")
+            .where({ chapter_id: chapterId })
+            .whereIn("entity_id", entityIds)
+            .delete();
+        if ((payload.operation === "add" || payload.operation === "replace") && entityIds.length)
+          await trx("chapter_entities")
+            .insert(entityIds.map((entityId) => ({ chapter_id: chapterId, entity_id: entityId })))
+            .onConflict(["chapter_id", "entity_id"])
+            .ignore();
         appliedEntityId = chapterId;
       } else if (row.action === "create_text_block") {
         const chapterId =

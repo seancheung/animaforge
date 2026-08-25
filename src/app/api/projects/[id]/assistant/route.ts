@@ -18,7 +18,7 @@ function isAbortError(error: unknown) {
 
 function readTarget(request: Request): { scope: AssistantScope; contextId: string | null } {
   const search = new URL(request.url).searchParams;
-  const value = search.get("scope") ?? "setup";
+  const value = search.get("scope") ?? "project";
   const parsed = assistantScopeSchema.safeParse(value);
   if (!parsed.success) throw new ApiError("invalidAssistantScope");
   const contextId = parsed.data === "chapter" ? search.get("contextId") : null;
@@ -45,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       content?: string;
       references?: AssistantResourceRef[];
     }>(request);
-    const scopeResult = assistantScopeSchema.safeParse(body.scope ?? "setup");
+    const scopeResult = assistantScopeSchema.safeParse(body.scope ?? "project");
     if (!scopeResult.success) throw new ApiError("invalidAssistantScope");
     const contextId = scopeResult.data === "chapter" ? body.contextId?.trim() : null;
     if (scopeResult.data === "chapter" && !contextId) throw new ApiError("assistantContextMissing");

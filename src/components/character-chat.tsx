@@ -30,13 +30,14 @@ import type {
   CharacterChatMessage,
   CharacterChatSession,
   CharacterChatSummary,
+  Entity,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const emptyContext = (): CharacterChatContextSettings => ({
   includeStorySynopsis: true,
   chapterIds: [],
-  characterIds: [],
+  entityIds: [],
   preferChapterSynopsis: true,
   allowCharacterMentions: false,
 });
@@ -52,11 +53,13 @@ export function CharacterChatWorkspace({
   projectId,
   initialChatId,
   characters,
+  entities,
   chapters,
 }: {
   projectId: string;
   initialChatId: string | null;
   characters: Character[];
+  entities: Entity[];
   chapters: Chapter[];
 }) {
   const t = useTranslations("CharacterChat");
@@ -890,7 +893,7 @@ export function CharacterChatWorkspace({
               userCharacter={
                 characters.find((character) => character.id === userCharacterId) ?? null
               }
-              characters={characters}
+              entities={entities}
               chapters={chapters}
             />
           </div>
@@ -936,7 +939,7 @@ export function CharacterChatWorkspace({
             onChange={setSettingsDraft}
             members={detail.data?.members ?? []}
             userCharacter={detail.data?.userCharacter ?? null}
-            characters={characters}
+            entities={entities}
             chapters={chapters}
           />
         </div>
@@ -1131,7 +1134,7 @@ function CharacterSelection({
   lockedIds = [],
   emptyLabel,
 }: {
-  characters: Character[];
+  characters: Entity[];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
   lockedIds?: string[];
@@ -1241,14 +1244,14 @@ function ContextSettingsFields({
   onChange,
   members,
   userCharacter,
-  characters,
+  entities,
   chapters,
 }: {
   value: CharacterChatContextSettings;
   onChange: (value: CharacterChatContextSettings) => void;
   members: Character[];
   userCharacter: Character | null;
-  characters: Character[];
+  entities: Entity[];
   chapters: Chapter[];
 }) {
   const t = useTranslations("CharacterChat");
@@ -1256,7 +1259,7 @@ function ContextSettingsFields({
     ...members.map((member) => member.id),
     ...(userCharacter ? [userCharacter.id] : []),
   ];
-  const selectedCharacterIds = [...new Set([...lockedIds, ...value.characterIds])];
+  const selectedEntityIds = [...new Set([...lockedIds, ...value.entityIds])];
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-zinc-200 p-4">
@@ -1285,13 +1288,13 @@ function ContextSettingsFields({
         />
       </div>
       <div>
-        <Label>{t("contextCharacters")}</Label>
+        <Label>{t("contextEntities")}</Label>
         <CharacterSelection
-          characters={characters}
-          selectedIds={selectedCharacterIds}
+          characters={entities}
+          selectedIds={selectedEntityIds}
           lockedIds={lockedIds}
-          onChange={(characterIds) => onChange({ ...value, characterIds })}
-          emptyLabel={t("noCharacters")}
+          onChange={(entityIds) => onChange({ ...value, entityIds })}
+          emptyLabel={t("noEntities")}
         />
       </div>
       {members.length > 1 ? (

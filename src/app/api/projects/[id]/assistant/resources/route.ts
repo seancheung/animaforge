@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const { id } = await params;
     const search = new URL(request.url).searchParams;
-    const scope = assistantScopeSchema.safeParse(search.get("scope") ?? "setup");
+    const scope = assistantScopeSchema.safeParse(search.get("scope") ?? "project");
     if (!scope.success) throw new ApiError("invalidAssistantScope");
     const contextId = scope.data === "chapter" ? search.get("contextId") : null;
     if (scope.data === "chapter" && !contextId) throw new ApiError("assistantContextMissing");

@@ -145,7 +145,7 @@ export function HomeClient() {
                     </span>
                     <span className="flex items-center gap-1">
                       <Users className="size-3.5" />
-                      {project.characterCount ?? 0}
+                      {project.entityCount ?? 0}
                     </span>
                     <span>{formatDate(project.updatedAt, locale, t("justNow"))}</span>
                   </div>

@@ -16,7 +16,7 @@ export async function GET() {
       )
       .select(
         conn.raw(
-          "(select count(*) from characters where characters.project_id = projects.id) as character_count",
+          "(select count(*) from entities where entities.project_id = projects.id) as entity_count",
         ),
       )
       .orderBy("updated_at", "desc");

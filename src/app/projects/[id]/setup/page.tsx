@@ -10,9 +10,7 @@ export default async function ProjectSetupPage({
   const { id } = await params;
   const query = await searchParams;
   const initialSetupSection =
-    query.section === "characters" || query.section === "outline" || query.section === "models"
-      ? query.section
-      : "basics";
+    query.section === "outline" || query.section === "models" ? query.section : "basics";
   return (
     <ProjectClient
       projectId={id}

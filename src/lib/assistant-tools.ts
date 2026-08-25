@@ -13,9 +13,12 @@ export type AssistantToolName =
   | "get_block_content"
   | "get_chapter_content"
   | "search_chapter_content"
-  | "list_characters"
-  | "get_character"
-  | "search_characters"
+  | "list_entity_types"
+  | "list_entities"
+  | "get_entity"
+  | "search_entities"
+  | "list_relations"
+  | "get_relation"
   | "list_attachments"
   | "read_attachment";
 
@@ -106,28 +109,47 @@ export const assistantToolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: "list_characters",
-    description:
-      "List all existing characters in the current project with IDs, names, and descriptions.",
+    name: "list_entity_types",
+    description: "List available system and custom entity types with exact IDs.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
   },
   {
-    name: "get_character",
-    description: "Read one existing character by its exact character ID.",
+    name: "list_entities",
+    description: "List all entities in the current project with type, ID, name, and description.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_entity",
+    description: "Read one existing entity by its exact entity ID.",
     parameters: {
       type: "object",
-      properties: { characterId: { type: "string" } },
-      required: ["characterId"],
+      properties: { entityId: { type: "string" } },
+      required: ["entityId"],
       additionalProperties: false,
     },
   },
   {
-    name: "search_characters",
-    description: "Search existing character names and descriptions in the current project.",
+    name: "search_entities",
+    description: "Search entity names, descriptions, and type names in the current project.",
     parameters: {
       type: "object",
       properties: { query: { type: "string" } },
       required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_relations",
+    description: "List entity relations with exact IDs and endpoint entity IDs.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "get_relation",
+    description: "Read one entity relation by its exact relation ID.",
+    parameters: {
+      type: "object",
+      properties: { relationId: { type: "string" } },
+      required: ["relationId"],
       additionalProperties: false,
     },
   },
@@ -431,43 +453,98 @@ export async function executeAssistantTool(
       };
     }
 
-    if (toolName === "list_characters") {
-      const rows = (await conn("characters")
-        .where({ project_id: projectId })
-        .orderBy("created_at", "asc")) as Row[];
+    if (toolName === "list_entity_types") {
+      const rows = (await conn("entity_types")
+        .whereNull("project_id")
+        .orWhere({ project_id: projectId })
+        .orderBy("sort_order", "asc")) as Row[];
       return {
         toolName,
-        label: t("characterList", { count: rows.length }),
-        result: rows.map((row) => ({ id: row.id, name: row.name, description: row.description })),
+        label: t("entityTypeList", { count: rows.length }),
+        result: rows.map((row) => ({
+          id: row.id,
+          systemKey: row.system_key,
+          name: row.name,
+          description: row.description,
+        })),
       };
     }
 
-    if (toolName === "get_character") {
-      const characterId = idSchema.parse(args.characterId);
-      const row = (await conn("characters")
-        .where({ id: characterId, project_id: projectId })
-        .first()) as Row | undefined;
-      if (!row) throw new ApiError("characterNotFound", 404);
-      return {
-        toolName,
-        label: t("character", { name: String(row.name) }),
-        result: { id: row.id, name: row.name, description: row.description },
-      };
-    }
-
-    if (toolName === "search_characters") {
-      const query = z.string().trim().min(1).max(200).parse(args.query);
-      const rows = (await conn("characters")
-        .where({ project_id: projectId })
-        .andWhere((builder) =>
-          builder.where("name", "like", `%${query}%`).orWhere("description", "like", `%${query}%`),
+    if (toolName === "list_entities" || toolName === "search_entities") {
+      const query =
+        toolName === "search_entities" ? z.string().trim().min(1).max(200).parse(args.query) : "";
+      let builder = conn("entities")
+        .join("entity_types", "entities.type_id", "entity_types.id")
+        .where("entities.project_id", projectId);
+      if (query)
+        builder = builder.andWhere((nested) =>
+          nested
+            .where("entities.name", "like", `%${query}%`)
+            .orWhere("entities.description", "like", `%${query}%`)
+            .orWhere("entity_types.name", "like", `%${query}%`),
+        );
+      const rows = (await builder
+        .select(
+          "entities.*",
+          "entity_types.system_key as type_system_key",
+          "entity_types.name as type_name",
         )
-        .orderBy("created_at", "asc")
-        .limit(20)) as Row[];
+        .orderBy("entities.created_at", "asc")
+        .limit(100)) as Row[];
       return {
         toolName,
-        label: t("searchCharacters", { query, count: rows.length }),
-        result: rows.map((row) => ({ id: row.id, name: row.name, description: row.description })),
+        label: query
+          ? t("searchEntities", { query, count: rows.length })
+          : t("entityList", { count: rows.length }),
+        result: rows.map((row) => ({
+          id: row.id,
+          typeId: row.type_id,
+          type: row.type_system_key ?? row.type_name,
+          name: row.name,
+          description: row.description,
+          alwaysInclude: Boolean(row.always_include),
+        })),
+      };
+    }
+
+    if (toolName === "get_entity") {
+      const entityId = idSchema.parse(args.entityId);
+      const row = (await conn("entities")
+        .join("entity_types", "entities.type_id", "entity_types.id")
+        .where({ "entities.id": entityId, "entities.project_id": projectId })
+        .select(
+          "entities.*",
+          "entity_types.system_key as type_system_key",
+          "entity_types.name as type_name",
+        )
+        .first()) as Row | undefined;
+      if (!row) throw new ApiError("entityNotFound", 404);
+      return {
+        toolName,
+        label: t("entity", { name: String(row.name) }),
+        result: {
+          id: row.id,
+          typeId: row.type_id,
+          type: row.type_system_key ?? row.type_name,
+          name: row.name,
+          description: row.description,
+          alwaysInclude: Boolean(row.always_include),
+        },
+      };
+    }
+
+    if (toolName === "list_relations" || toolName === "get_relation") {
+      const relationId = toolName === "get_relation" ? idSchema.parse(args.relationId) : null;
+      let builder = conn("entity_relations").where({ project_id: projectId });
+      if (relationId) builder = builder.andWhere({ id: relationId });
+      const rows = (await builder.orderBy("created_at", "asc")) as Row[];
+      if (relationId && !rows.length) throw new ApiError("entityRelationNotFound", 404);
+      return {
+        toolName,
+        label: relationId
+          ? t("relation", { name: String(rows[0].name) })
+          : t("relationList", { count: rows.length }),
+        result: relationId ? rows[0] : rows,
       };
     }
 
@@ -528,7 +605,7 @@ export async function listAssistantResources(
     String(value ?? "")
       .toLocaleLowerCase()
       .includes(normalized);
-  const [chapters, blocks, characters, conversation] = await Promise.all([
+  const [chapters, blocks, entities, relations, conversation] = await Promise.all([
     conn("chapters").where({ project_id: projectId }).orderBy("sort_order", "asc") as Promise<
       Row[]
     >,
@@ -545,9 +622,12 @@ export async function listAssistantResources(
         "blocks.sort_order",
         "chapters.title as chapter_title",
       ) as Promise<Row[]>,
-    conn("characters").where({ project_id: projectId }).orderBy("created_at", "asc") as Promise<
+    conn("entities").where({ project_id: projectId }).orderBy("created_at", "asc") as Promise<
       Row[]
     >,
+    conn("entity_relations")
+      .where({ project_id: projectId })
+      .orderBy("created_at", "asc") as Promise<Row[]>,
     ensureToolConversation(projectId, scope, contextId),
   ]);
   const attachments = (await conn("assistant_attachments")
@@ -562,13 +642,21 @@ export async function listAssistantResources(
         label: String(row.title),
         description: t("chapter"),
       })),
-    ...characters
+    ...entities
       .filter((row) => matches(row.name) || matches(row.description))
       .map((row) => ({
-        type: "character" as const,
+        type: "entity" as const,
         id: String(row.id),
         label: String(row.name),
-        description: t("character"),
+        description: t("entityResource"),
+      })),
+    ...relations
+      .filter((row) => matches(row.name) || matches(row.description))
+      .map((row) => ({
+        type: "relation" as const,
+        id: String(row.id),
+        label: String(row.name),
+        description: t("relationResource"),
       })),
     ...attachments
       .filter((row) => matches(row.name))
@@ -669,12 +757,27 @@ export async function resolveAssistantReferences(
           },
         });
       }
-    } else if (reference.type === "character") {
+    } else if (reference.type === "entity") {
       const result = await executeAssistantTool(
         projectId,
         scope,
-        "get_character",
-        { characterId: reference.id },
+        "get_entity",
+        { entityId: reference.id },
+        contextId,
+      );
+      if (!(typeof result.result === "object" && result.result && "error" in result.result))
+        resolved.push({
+          type: reference.type,
+          id: reference.id,
+          label: String((result.result as { name?: unknown }).name ?? reference.label),
+          data: result.result,
+        });
+    } else if (reference.type === "relation") {
+      const result = await executeAssistantTool(
+        projectId,
+        scope,
+        "get_relation",
+        { relationId: reference.id },
         contextId,
       );
       if (!(typeof result.result === "object" && result.result && "error" in result.result))

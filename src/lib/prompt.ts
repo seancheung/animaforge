@@ -91,16 +91,26 @@ export function buildPrompt(
       "prose_style",
       mergeStyleInstructions(detail.styleFingerprint, detail.project.proseStyle),
     ),
-    "<characters>",
-    ...detail.characters.map((character) =>
+    "<entities>",
+    ...detail.entities.map((entity) =>
       [
-        `<character id="${character.id}">`,
-        element("character_name", character.name),
-        element("character_description", character.description),
-        "</character>",
+        `<entity id="${entity.id}" type="${xml(entity.type.systemKey ?? entity.type.name)}">`,
+        element("entity_name", entity.name),
+        element("entity_description", entity.description),
+        "</entity>",
       ].join("\n"),
     ),
-    "</characters>",
+    "</entities>",
+    "<entity_relations>",
+    ...detail.relations.map((relation) =>
+      [
+        `<relation id="${relation.id}" source_entity_id="${relation.sourceEntityId}" target_entity_id="${relation.targetEntityId}">`,
+        element("relation_name", relation.name),
+        element("relation_description", relation.description),
+        "</relation>",
+      ].join("\n"),
+    ),
+    "</entity_relations>",
   ];
 
   const adjacentElements: string[] = [];

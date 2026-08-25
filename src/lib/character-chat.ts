@@ -1,5 +1,14 @@
 import { ApiError } from "@/lib/api";
-import { loadBlocks, loadServices, loadSettings, mapCharacter, mapProject } from "@/lib/data";
+import {
+  entitySelectColumns,
+  loadBlocks,
+  loadEntities,
+  loadEntityRelations,
+  loadServices,
+  loadSettings,
+  mapEntity,
+  mapProject,
+} from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
 import { generateModelText } from "@/lib/model-generation";
 import {
@@ -46,7 +55,7 @@ export function normalizeChatContextSettings(
   return {
     includeStorySynopsis: input.includeStorySynopsis !== false,
     chapterIds: uniqueStrings(input.chapterIds),
-    characterIds: [...new Set([...memberIds, ...uniqueStrings(input.characterIds)])],
+    entityIds: [...new Set([...memberIds, ...uniqueStrings(input.entityIds)])],
     preferChapterSynopsis: input.preferChapterSynopsis !== false,
     allowCharacterMentions: input.allowCharacterMentions === true,
   };
@@ -67,7 +76,7 @@ function mapMessage(row: Row): CharacterChatMessage {
     id: String(row.id),
     sessionId: String(row.session_id),
     role: row.role === "character" ? "character" : "author",
-    characterId: row.character_id ? String(row.character_id) : null,
+    characterId: row.speaker_entity_id ? String(row.speaker_entity_id) : null,
     content: String(row.content ?? ""),
     createdAt: timestamp(row.created_at),
   };
@@ -77,14 +86,16 @@ async function loadMembers(chatIds: string[]): Promise<Map<string, Character[]>>
   if (!chatIds.length) return new Map();
   const conn = await getDb();
   const rows = (await conn("character_chat_members")
-    .join("characters", "character_chat_members.character_id", "characters.id")
+    .join("entities", "character_chat_members.entity_id", "entities.id")
+    .join("entity_types", "entities.type_id", "entity_types.id")
     .whereIn("character_chat_members.chat_id", chatIds)
-    .select("characters.*", "character_chat_members.chat_id as membership_chat_id")
+    .select(entitySelectColumns)
+    .select("character_chat_members.chat_id as membership_chat_id")
     .orderBy("character_chat_members.sort_order", "asc")) as Row[];
   const result = new Map<string, Character[]>();
   for (const row of rows) {
     const chatId = String(row.membership_chat_id);
-    result.set(chatId, [...(result.get(chatId) ?? []), mapCharacter(row)]);
+    result.set(chatId, [...(result.get(chatId) ?? []), mapEntity(row)]);
   }
   return result;
 }
@@ -99,17 +110,13 @@ export async function loadProjectCharacterChats(
   const members = await loadMembers(rows.map((row) => String(row.id)));
   const userCharacterIds = [
     ...new Set(
-      rows
-        .map((row) => (row.user_character_id ? String(row.user_character_id) : ""))
-        .filter(Boolean),
+      rows.map((row) => (row.user_entity_id ? String(row.user_entity_id) : "")).filter(Boolean),
     ),
   ];
   const userCharacterRows = userCharacterIds.length
-    ? ((await conn("characters").whereIn("id", userCharacterIds)) as Row[])
+    ? await loadEntities(projectId, userCharacterIds)
     : [];
-  const userCharacters = new Map(
-    userCharacterRows.map((row) => [String(row.id), mapCharacter(row)]),
-  );
+  const userCharacters = new Map(userCharacterRows.map((entity) => [entity.id, entity]));
   const sessionCounts = (await conn("character_chat_sessions")
     .whereIn(
       "chat_id",
@@ -126,14 +133,14 @@ export async function loadProjectCharacterChats(
       id,
       projectId: String(row.project_id),
       members: chatMembers,
-      userCharacter: row.user_character_id
-        ? (userCharacters.get(String(row.user_character_id)) ?? null)
+      userCharacter: row.user_entity_id
+        ? (userCharacters.get(String(row.user_entity_id)) ?? null)
         : null,
       contextSettings: normalizeChatContextSettings(
         parseJson(String(row.context_settings ?? "{}"), {}),
         [
           ...chatMembers.map((member) => member.id),
-          ...(row.user_character_id ? [String(row.user_character_id)] : []),
+          ...(row.user_entity_id ? [String(row.user_entity_id)] : []),
         ],
       ),
       sessionCount: counts.get(id) ?? 0,
@@ -150,8 +157,8 @@ export async function loadCharacterChat(
   const row = (await conn("character_chats").where({ id: chatId }).first()) as Row | undefined;
   if (!row) throw new ApiError("chatNotFound", 404);
   const members = (await loadMembers([chatId])).get(chatId) ?? [];
-  const userCharacterRow = row.user_character_id
-    ? ((await conn("characters").where({ id: row.user_character_id }).first()) as Row | undefined)
+  const userCharacterRow = row.user_entity_id
+    ? (await loadEntities(String(row.project_id), [String(row.user_entity_id)]))[0]
     : undefined;
   const sessions = (
     (await conn("character_chat_sessions")
@@ -171,7 +178,7 @@ export async function loadCharacterChat(
     id: chatId,
     projectId: String(row.project_id),
     members,
-    userCharacter: userCharacterRow ? mapCharacter(userCharacterRow) : null,
+    userCharacter: userCharacterRow ?? null,
     contextSettings: normalizeChatContextSettings(
       parseJson(String(row.context_settings ?? "{}"), {}),
       [
@@ -196,9 +203,10 @@ export async function createCharacterChat(
   const conn = await getDb();
   const orderedMemberIds = uniqueStrings(memberIds);
   if (!orderedMemberIds.length) throw new ApiError("chatMembersRequired");
-  const characters = (await conn("characters")
-    .where({ project_id: projectId })
-    .whereIn("id", orderedMemberIds)) as Row[];
+  const characters = await conn("entities")
+    .join("entity_types", "entities.type_id", "entity_types.id")
+    .where({ "entities.project_id": projectId, "entity_types.system_key": "character" })
+    .whereIn("entities.id", orderedMemberIds);
   if (characters.length !== orderedMemberIds.length) throw new ApiError("chatMemberInvalid");
   const memberKey = [...orderedMemberIds].sort().join(":");
   const existing = (await conn("character_chats")
@@ -210,7 +218,14 @@ export async function createCharacterChat(
     throw new ApiError("chatIdentityCannotBeMember");
   if (
     userCharacterId &&
-    !(await conn("characters").where({ project_id: projectId, id: userCharacterId }).first())
+    !(await conn("entities")
+      .join("entity_types", "entities.type_id", "entity_types.id")
+      .where({
+        "entities.project_id": projectId,
+        "entities.id": userCharacterId,
+        "entity_types.system_key": "character",
+      })
+      .first())
   )
     throw new ApiError("chatIdentityInvalid");
 
@@ -224,14 +239,14 @@ export async function createCharacterChat(
     await trx("character_chats").insert({
       id: chatId,
       project_id: projectId,
-      user_character_id: userCharacterId || null,
+      user_entity_id: userCharacterId || null,
       member_key: memberKey,
       context_settings: JSON.stringify(normalized),
     });
     await trx("character_chat_members").insert(
-      orderedMemberIds.map((characterId, index) => ({
+      orderedMemberIds.map((entityId, index) => ({
         chat_id: chatId,
-        character_id: characterId,
+        entity_id: entityId,
         sort_order: index,
       })),
     );
@@ -246,18 +261,18 @@ export async function updateCharacterChatContext(
 ): Promise<CharacterChatDetail> {
   const chat = await loadCharacterChat(chatId);
   const conn = await getDb();
-  const [chapterRows, characterRows] = await Promise.all([
+  const [chapterRows, entityRows] = await Promise.all([
     conn("chapters").where({ project_id: chat.projectId }).select("id") as Promise<Row[]>,
-    conn("characters").where({ project_id: chat.projectId }).select("id") as Promise<Row[]>,
+    conn("entities").where({ project_id: chat.projectId }).select("id") as Promise<Row[]>,
   ]);
   const chapterIds = new Set(chapterRows.map((row) => String(row.id)));
-  const characterIds = new Set(characterRows.map((row) => String(row.id)));
+  const entityIds = new Set(entityRows.map((row) => String(row.id)));
   const normalized = normalizeChatContextSettings(contextSettings, [
     ...chat.members.map((member) => member.id),
     ...(chat.userCharacter ? [chat.userCharacter.id] : []),
   ]);
   normalized.chapterIds = normalized.chapterIds.filter((id) => chapterIds.has(id));
-  normalized.characterIds = normalized.characterIds.filter((id) => characterIds.has(id));
+  normalized.entityIds = normalized.entityIds.filter((id) => entityIds.has(id));
   await conn("character_chats")
     .where({ id: chatId })
     .update({ context_settings: JSON.stringify(normalized), updated_at: conn.fn.now() });
@@ -384,20 +399,25 @@ async function buildChatContext(
 ): Promise<string> {
   const conn = await getDb();
   const contextSettings = chat.contextSettings;
-  const [chapterRows, characterRows] = await Promise.all([
+  const [chapterRows, entityRows] = await Promise.all([
     contextSettings.chapterIds.length
       ? (conn("chapters")
           .where({ project_id: chat.projectId })
           .whereIn("id", contextSettings.chapterIds)
           .orderBy("sort_order", "asc") as Promise<Row[]>)
       : [],
-    contextSettings.characterIds.length
-      ? (conn("characters")
-          .where({ project_id: chat.projectId })
-          .whereIn("id", contextSettings.characterIds)
-          .orderBy("created_at", "asc") as Promise<Row[]>)
-      : [],
+    contextSettings.entityIds.length ? loadEntities(chat.projectId, contextSettings.entityIds) : [],
   ]);
+  const relations = await loadEntityRelations(
+    chat.projectId,
+    entityRows.map((entity) => entity.id),
+  );
+  const contextEntityIds = new Set(entityRows.map((entity) => entity.id));
+  relations.forEach((relation) => {
+    contextEntityIds.add(relation.sourceEntityId);
+    contextEntityIds.add(relation.targetEntityId);
+  });
+  const contextEntities = await loadEntities(chat.projectId, [...contextEntityIds]);
   const chapters = (
     await Promise.all(
       chapterRows.map(async (row) => {
@@ -422,9 +442,12 @@ async function buildChatContext(
   return `<project_context>
 ${contextSettings.includeStorySynopsis ? `  <story_synopsis>${escapeXml(project.synopsis)}</story_synopsis>` : ""}
   <output_language>${escapeXml(project.language || appSettings.language)}</output_language>
-  <characters>
-${characterRows.map((row) => `    <character id="${escapeXml(row.id)}" name="${escapeXml(row.name)}">${escapeXml(row.description)}</character>`).join("\n")}
-  </characters>
+  <entities>
+${contextEntities.map((entity) => `    <entity id="${escapeXml(entity.id)}" type="${escapeXml(entity.type.systemKey ?? entity.type.name)}" name="${escapeXml(entity.name)}">${escapeXml(entity.description)}</entity>`).join("\n")}
+  </entities>
+  <entity_relations>
+${relations.map((relation) => `    <relation source_entity_id="${escapeXml(relation.sourceEntityId)}" target_entity_id="${escapeXml(relation.targetEntityId)}" name="${escapeXml(relation.name)}">${escapeXml(relation.description)}</relation>`).join("\n")}
+  </entity_relations>
   <chapters>
 ${chapters.join("\n")}
   </chapters>
@@ -607,7 +630,7 @@ export async function runCharacterChatTurn(
       id: characterMessage.id,
       session_id: sessionId,
       role: "character",
-      character_id: character.id,
+      speaker_entity_id: character.id,
       content: response,
       created_at: characterMessage.createdAt,
     });

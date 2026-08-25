@@ -5,7 +5,9 @@ import type {
   AppSettings,
   Block,
   Chapter,
-  Character,
+  Entity,
+  EntityRelation,
+  EntityType,
   LlmService,
   Project,
   ReviewerPrompt,
@@ -63,7 +65,7 @@ export function mapProject(row: Row): Project {
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
     chapterCount: row.chapter_count === undefined ? undefined : Number(row.chapter_count),
-    characterCount: row.character_count === undefined ? undefined : Number(row.character_count),
+    entityCount: row.entity_count === undefined ? undefined : Number(row.entity_count),
   };
 }
 
@@ -92,26 +94,131 @@ export async function loadStyleFingerprint(
   return row ? mapStyleFingerprint(row) : null;
 }
 
-export function mapCharacter(row: Row): Character {
+export function mapEntityType(row: Row, prefix = ""): EntityType {
+  const value = (key: string) => row[`${prefix}${key}`];
+  const systemKey = value("system_key");
+  return {
+    id: String(value("id")),
+    projectId: value("project_id") ? String(value("project_id")) : null,
+    systemKey:
+      systemKey === "character" ||
+      systemKey === "location" ||
+      systemKey === "item" ||
+      systemKey === "organization" ||
+      systemKey === "rule" ||
+      systemKey === "other"
+        ? systemKey
+        : null,
+    name: String(value("name") ?? ""),
+    description: String(value("description") ?? ""),
+    sortOrder: Number(value("sort_order") ?? 0),
+    createdAt: timestamp(value("created_at")),
+    updatedAt: timestamp(value("updated_at")),
+  };
+}
+
+export function mapEntity(row: Row): Entity {
   return {
     id: String(row.id),
     projectId: String(row.project_id),
+    typeId: String(row.type_id),
+    type: mapEntityType(row, "type_"),
     name: String(row.name),
     description: String(row.description ?? ""),
+    alwaysInclude: Boolean(row.always_include),
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
   };
 }
 
-export function mapChapter(row: Row, characterIds: string[] = []): Chapter {
+export function mapEntityRelation(row: Row): EntityRelation {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    sourceEntityId: String(row.source_entity_id),
+    targetEntityId: String(row.target_entity_id),
+    name: String(row.name),
+    description: String(row.description ?? ""),
+    alwaysInclude: Boolean(row.always_include),
+    createdAt: timestamp(row.created_at),
+    updatedAt: timestamp(row.updated_at),
+  };
+}
+
+export const entitySelectColumns = [
+  "entities.*",
+  "entity_types.project_id as type_project_id",
+  "entity_types.system_key as type_system_key",
+  "entity_types.name as type_name",
+  "entity_types.description as type_description",
+  "entity_types.sort_order as type_sort_order",
+  "entity_types.created_at as type_created_at",
+  "entity_types.updated_at as type_updated_at",
+];
+
+export async function loadEntityTypes(projectId: string): Promise<EntityType[]> {
+  const conn = await getDb();
+  const rows = (await conn("entity_types")
+    .whereNull("project_id")
+    .orWhere({ project_id: projectId })
+    .orderByRaw("case when system_key is null then 1 else 0 end")
+    .orderBy("sort_order", "asc")
+    .orderBy("name", "asc")) as Row[];
+  return rows.map((row) => mapEntityType(row));
+}
+
+export async function loadEntities(
+  projectId: string,
+  ids?: string[],
+  trx?: Knex.Transaction,
+): Promise<Entity[]> {
+  const conn = trx ?? (await getDb());
+  let query = conn("entities")
+    .join("entity_types", "entities.type_id", "entity_types.id")
+    .where("entities.project_id", projectId)
+    .select(entitySelectColumns)
+    .orderBy("entity_types.sort_order", "asc")
+    .orderBy("entities.created_at", "asc");
+  if (ids) {
+    if (!ids.length) return [];
+    query = query.whereIn("entities.id", ids);
+  }
+  return ((await query) as Row[]).map(mapEntity);
+}
+
+export async function loadEntity(
+  projectId: string,
+  entityId: string,
+  trx?: Knex.Transaction,
+): Promise<Entity | null> {
+  return (await loadEntities(projectId, [entityId], trx))[0] ?? null;
+}
+
+export async function loadEntityRelations(
+  projectId: string,
+  entityIds?: string[],
+  trx?: Knex.Transaction,
+): Promise<EntityRelation[]> {
+  const conn = trx ?? (await getDb());
+  let query = conn("entity_relations").where({ project_id: projectId });
+  if (entityIds) {
+    if (!entityIds.length) return [];
+    query = query.andWhere((builder) =>
+      builder.whereIn("source_entity_id", entityIds).orWhereIn("target_entity_id", entityIds),
+    );
+  }
+  return ((await query.orderBy("created_at", "asc")) as Row[]).map(mapEntityRelation);
+}
+
+export function mapChapter(row: Row, entityIds: string[] = []): Chapter {
   return {
     id: String(row.id),
     projectId: String(row.project_id),
     title: String(row.title),
     synopsis: String(row.synopsis ?? ""),
     sortOrder: Number(row.sort_order),
-    characterMode: row.character_mode === "selected" ? "selected" : "all",
-    characterIds,
+    entityMode: row.entity_mode === "all" ? "all" : "selected",
+    entityIds,
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
   };

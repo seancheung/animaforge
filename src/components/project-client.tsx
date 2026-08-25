@@ -7,7 +7,7 @@ import {
   ArrowUp,
   ArrowUpRight,
   BookOpen,
-  Bot,
+  Boxes,
   ChartNoAxesColumnIncreasing,
   ClipboardPenLine,
   Coins,
@@ -26,7 +26,6 @@ import {
   Settings2,
   Sparkles,
   Trash2,
-  UserRound,
   Users,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -35,9 +34,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AssistantPanelHeader } from "@/components/assistant-panel-header";
 import { ChapterEditor } from "@/components/chapter-editor";
 import { CharacterChatWorkspace } from "@/components/character-chat";
 import { CreativeAssistant } from "@/components/creative-assistant";
+import { EntityWorkspace } from "@/components/entity-workspace";
 import { ProjectPreviewWorkspace } from "@/components/project-preview";
 import { ProjectReviewWorkspace } from "@/components/project-review";
 import { ProjectRevisionWorkspace } from "@/components/project-revision";
@@ -58,7 +59,9 @@ import type {
   AppSettings,
   AssistantProposalItem,
   Chapter,
-  Character,
+  Entity,
+  EntityRelation,
+  EntityType,
   LlmService,
   Project,
   StyleFingerprint,
@@ -69,7 +72,7 @@ import { cn, formatCompactNumber, formatDollarAmount } from "@/lib/utils";
 
 interface ProjectStats {
   chapterCount: number;
-  characterCount: number;
+  entityCount: number;
   textBlockCount: number;
   checkpointCount: number;
   staleCheckpointCount: number;
@@ -87,7 +90,9 @@ interface ProjectStats {
 }
 interface ProjectDetail {
   project: Project;
-  characters: Character[];
+  entities: Entity[];
+  entityTypes: EntityType[];
+  relations: EntityRelation[];
   chapters: Chapter[];
   stats: ProjectStats;
 }
@@ -96,13 +101,20 @@ interface SettingsPayload {
   services: LlmService[];
   styleFingerprints: StyleFingerprint[];
 }
-type DeleteTarget = { kind: "chapter" | "character"; id: string; name: string };
+type DeleteTarget = { kind: "chapter"; id: string; name: string };
 type ProjectDraft = Pick<
   Project,
   "name" | "synopsis" | "proseStyle" | "styleFingerprintId" | "language" | "modelOverrides"
 >;
-type ProjectView = "overview" | "setup" | "preview" | "chats" | "reviews" | "revisions";
-type SetupSection = "basics" | "characters" | "outline" | "models";
+type ProjectView =
+  | "overview"
+  | "setup"
+  | "entities"
+  | "preview"
+  | "chats"
+  | "reviews"
+  | "revisions";
+type SetupSection = "basics" | "outline" | "models";
 
 const emptyDraft: ProjectDraft = {
   name: "",
@@ -145,10 +157,7 @@ export function ProjectClient({
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(initialChapterId);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyDraft);
   const [chapterOpen, setChapterOpen] = useState(false);
-  const [characterFormOpen, setCharacterFormOpen] = useState(false);
   const [chapterForm, setChapterForm] = useState({ title: "", synopsis: "" });
-  const [characterForm, setCharacterForm] = useState({ name: "", description: "" });
-  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [renamingChapterId, setRenamingChapterId] = useState<string | null>(null);
   const [chapterTitleDraft, setChapterTitleDraft] = useState("");
@@ -232,6 +241,7 @@ export function ProjectClient({
   };
 
   const showSetup = () => router.push(`/projects/${projectId}/setup`, { scroll: false });
+  const showEntities = () => router.push(`/projects/${projectId}/entities`, { scroll: false });
   const showPreview = () => router.push(`/projects/${projectId}/preview`, { scroll: false });
   const showChats = () => router.push(`/projects/${projectId}/chats`, { scroll: false });
   const showReviews = () => router.push(`/projects/${projectId}/reviews`, { scroll: false });
@@ -261,40 +271,15 @@ export function ProjectClient({
     onError: (error) => toast.error(error.message),
   });
 
-  const saveCharacter = useMutation({
-    mutationFn: () =>
-      editingCharacter
-        ? api(`/api/characters/${editingCharacter.id}`, {
-            method: "PATCH",
-            body: JSON.stringify(characterForm),
-          })
-        : api(`/api/projects/${projectId}/characters`, {
-            method: "POST",
-            body: JSON.stringify(characterForm),
-          }),
-    onSuccess: () => {
-      refresh();
-      client.invalidateQueries({ queryKey: ["chapter"] });
-      setCharacterFormOpen(false);
-      setEditingCharacter(null);
-      setCharacterForm({ name: "", description: "" });
-    },
-    onError: (error) => toast.error(error.message),
-  });
-
   const remove = useMutation({
     mutationFn: (target: DeleteTarget) =>
-      api(`/api/${target.kind === "chapter" ? "chapters" : "characters"}/${target.id}`, {
+      api(`/api/chapters/${target.id}`, {
         method: "DELETE",
       }),
     onSuccess: (_result, target) => {
       refresh();
-      if (target.kind === "chapter") {
-        client.removeQueries({ queryKey: ["chapter", target.id] });
-        if (selectedChapterId === target.id) showInfo();
-      } else {
-        client.invalidateQueries({ queryKey: ["chapter"] });
-      }
+      client.removeQueries({ queryKey: ["chapter", target.id] });
+      if (selectedChapterId === target.id) showInfo();
       setDeleteTarget(null);
     },
     onError: (error) => toast.error(error.message),
@@ -320,16 +305,6 @@ export function ProjectClient({
     },
     onError: (error) => toast.error(error.message),
   });
-
-  const openCharacter = (character?: Character) => {
-    setEditingCharacter(character ?? null);
-    setCharacterForm(
-      character
-        ? { name: character.name, description: character.description }
-        : { name: "", description: "" },
-    );
-    setCharacterFormOpen(true);
-  };
 
   const handleAssistantApplied = (item: AssistantProposalItem) => {
     if (item.action === "update_project_field") {
@@ -362,7 +337,8 @@ export function ProjectClient({
       </div>
     );
 
-  const { project, chapters, characters, stats } = detail.data;
+  const { project, chapters, entities, entityTypes, relations, stats } = detail.data;
+  const characters = entities.filter((entity) => entity.type.systemKey === "character");
   const activeChapterId =
     initialView === "overview" && chapters.some((chapter) => chapter.id === selectedChapterId)
       ? selectedChapterId
@@ -379,6 +355,7 @@ export function ProjectClient({
         chapterTitleDraft={chapterTitleDraft}
         onInfo={showInfo}
         onSetup={showSetup}
+        onEntities={showEntities}
         onPreview={showPreview}
         onChats={showChats}
         onReviews={showReviews}
@@ -407,6 +384,7 @@ export function ProjectClient({
             projectId={projectId}
             initialChatId={initialChatId}
             characters={characters}
+            entities={entities}
             chapters={chapters}
           />
         ) : initialView === "reviews" ? (
@@ -422,6 +400,14 @@ export function ProjectClient({
             initialRevisionId={initialRevisionId}
             project={project}
           />
+        ) : initialView === "entities" ? (
+          <EntityWorkspace
+            projectId={projectId}
+            entities={entities}
+            entityTypes={entityTypes}
+            relations={relations}
+            onAssistantApplied={handleAssistantApplied}
+          />
         ) : initialView === "preview" ? (
           <ProjectPreviewWorkspace projectId={projectId} project={project} />
         ) : initialView === "setup" ? (
@@ -432,14 +418,8 @@ export function ProjectClient({
             settings={settings.data?.settings}
             styleFingerprints={settings.data?.styleFingerprints ?? []}
             modelOptions={modelOptions}
-            characters={characters}
             chapters={chapters}
             onChange={updateProjectDraft}
-            onAddCharacter={() => openCharacter()}
-            onEditCharacter={openCharacter}
-            onDeleteCharacter={(character) =>
-              setDeleteTarget({ kind: "character", id: character.id, name: character.name })
-            }
             onAddChapter={() => setChapterOpen(true)}
             onOpenChapter={selectChapter}
             onAssistantApplied={handleAssistantApplied}
@@ -494,57 +474,10 @@ export function ProjectClient({
           </div>
         </form>
       </Modal>
-      <Modal
-        open={characterFormOpen}
-        onOpenChange={setCharacterFormOpen}
-        title={editingCharacter ? t("editCharacter") : t("addCharacter")}
-      >
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            saveCharacter.mutate();
-          }}
-        >
-          <div className="space-y-4 p-5">
-            <div>
-              <Label>{t("characterName")}</Label>
-              <Input
-                autoFocus
-                required
-                value={characterForm.name}
-                onChange={(event) =>
-                  setCharacterForm({ ...characterForm, name: event.target.value })
-                }
-              />
-            </div>
-            <div>
-              <Label>{t("characterDescription")}</Label>
-              <Textarea
-                className="min-h-36"
-                value={characterForm.description}
-                onChange={(event) =>
-                  setCharacterForm({ ...characterForm, description: event.target.value })
-                }
-                placeholder={t("characterDescriptionPlaceholder")}
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
-            <Button type="button" variant="secondary" onClick={() => setCharacterFormOpen(false)}>
-              {common("cancel")}
-            </Button>
-            <Button type="submit" loading={saveCharacter.isPending}>
-              {t("saveCharacter")}
-            </Button>
-          </div>
-        </form>
-      </Modal>
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={t("deleteEntityTitle", {
-          entity: deleteTarget?.kind === "chapter" ? t("chapter") : t("character"),
-        })}
+        title={t("deleteEntityTitle", { entity: t("chapter") })}
         description={t("deleteEntityDescription", { name: deleteTarget?.name ?? "" })}
         onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
         loading={remove.isPending}
@@ -562,6 +495,7 @@ function ProjectSidebar({
   chapterTitleDraft,
   onInfo,
   onSetup,
+  onEntities,
   onPreview,
   onChats,
   onReviews,
@@ -583,6 +517,7 @@ function ProjectSidebar({
   chapterTitleDraft: string;
   onInfo: () => void;
   onSetup: () => void;
+  onEntities: () => void;
   onPreview: () => void;
   onChats: () => void;
   onReviews: () => void;
@@ -666,6 +601,14 @@ function ProjectSidebar({
           onClick={onSetup}
         >
           <NotebookTabs className="size-4" />
+        </SidebarButton>
+        <SidebarButton
+          collapsed={collapsed}
+          active={view === "entities"}
+          label={t("entities")}
+          onClick={onEntities}
+        >
+          <Boxes className="size-4" />
         </SidebarButton>
         <SidebarButton
           collapsed={collapsed}
@@ -943,8 +886,8 @@ function ProjectOverview({
             />
             <StatCard
               icon={<Users className="size-4" />}
-              label={t("characters")}
-              value={stats.characterCount.toLocaleString()}
+              label={t("entities")}
+              value={stats.entityCount.toLocaleString()}
             />
             <StatCard
               icon={<FileText className="size-4" />}
@@ -1209,12 +1152,8 @@ function SetupWorkspace({
   settings,
   styleFingerprints,
   modelOptions,
-  characters,
   chapters,
   onChange,
-  onAddCharacter,
-  onEditCharacter,
-  onDeleteCharacter,
   onAddChapter,
   onOpenChapter,
   onAssistantApplied,
@@ -1225,12 +1164,8 @@ function SetupWorkspace({
   settings?: AppSettings;
   styleFingerprints: StyleFingerprint[];
   modelOptions: { value: string; label: string; description?: string }[];
-  characters: Character[];
   chapters: Chapter[];
   onChange: (updater: (current: ProjectDraft) => ProjectDraft) => void;
-  onAddCharacter: () => void;
-  onEditCharacter: (character: Character) => void;
-  onDeleteCharacter: (character: Character) => void;
   onAddChapter: () => void;
   onOpenChapter: (id: string) => void;
   onAssistantApplied: (item: AssistantProposalItem) => void;
@@ -1240,10 +1175,7 @@ function SetupWorkspace({
   const searchParams = useSearchParams();
   const requestedSection = searchParams.get("section");
   const section: SetupSection =
-    requestedSection === "characters" ||
-    requestedSection === "outline" ||
-    requestedSection === "models" ||
-    requestedSection === "basics"
+    requestedSection === "outline" || requestedSection === "models" || requestedSection === "basics"
       ? requestedSection
       : initialSection;
   const selectSection = (next: SetupSection) => {
@@ -1254,7 +1186,7 @@ function SetupWorkspace({
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center border-zinc-200 border-b bg-white px-5">
           <div className="flex rounded-lg bg-zinc-100 p-1">
-            {(["basics", "characters", "outline", "models"] as SetupSection[]).map((item) => (
+            {(["basics", "outline", "models"] as SetupSection[]).map((item) => (
               <button
                 key={item}
                 type="button"
@@ -1280,13 +1212,6 @@ function SetupWorkspace({
             title={t("setupBasicsTitle")}
             description={t("settingsDescription")}
           />
-        ) : section === "characters" ? (
-          <CharactersSetupSection
-            characters={characters}
-            onAdd={onAddCharacter}
-            onEdit={onEditCharacter}
-            onDelete={onDeleteCharacter}
-          />
         ) : section === "outline" ? (
           <OutlineSetupSection chapters={chapters} onAdd={onAddChapter} onOpen={onOpenChapter} />
         ) : (
@@ -1297,11 +1222,11 @@ function SetupWorkspace({
           />
         )}
       </section>
-      <ResizablePanel storageKey="setup-assistant" className="flex flex-col">
-        <AssistantPanelHeader title={t("assistant")} subtitle={t("setupAssistantSubtitle")} />
+      <ResizablePanel storageKey="project-assistant" className="flex flex-col">
+        <AssistantPanelHeader title={t("assistant")} />
         <CreativeAssistant
           projectId={projectId}
-          scope="setup"
+          scope="project"
           embedded
           onApplied={onAssistantApplied}
         />
@@ -1466,79 +1391,6 @@ function ModelOverridesSetupSection({
   );
 }
 
-function CharactersSetupSection({
-  characters,
-  onAdd,
-  onEdit,
-  onDelete,
-}: {
-  characters: Character[];
-  onAdd: () => void;
-  onEdit: (character: Character) => void;
-  onDelete: (character: Character) => void;
-}) {
-  const t = useTranslations("Project");
-  return (
-    <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6 pt-7 pb-8">
-      <div className="mb-6 flex items-start justify-between gap-5">
-        <div>
-          <h1 className="font-semibold text-2xl tracking-tight">{t("characters")}</h1>
-          <p className="mt-1.5 text-sm text-zinc-500">{t("charactersDescription")}</p>
-        </div>
-        <Button size="sm" onClick={onAdd}>
-          <Plus className="size-3.5" />
-          {t("addCharacter")}
-        </Button>
-      </div>
-      {characters.length ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-3">
-          {characters.map((character) => (
-            <div
-              key={character.id}
-              className="group relative h-44 rounded-xl border border-zinc-200 bg-white p-4 transition-[border-color,box-shadow] hover:border-zinc-300 hover:shadow-sm"
-            >
-              <button
-                type="button"
-                onClick={() => onEdit(character)}
-                className="block h-full w-full text-left"
-              >
-                <span className="flex items-center gap-3 pr-9">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-zinc-100">
-                    <UserRound className="size-4 text-zinc-600" />
-                  </span>
-                  <span className="min-w-0 truncate font-semibold text-sm">{character.name}</span>
-                </span>
-                <span className="mt-3 line-clamp-3 text-sm text-zinc-500 leading-6">
-                  {character.description || t("noCharacterDescription")}
-                </span>
-              </button>
-              <Button
-                className="absolute top-3 right-3 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                variant="ghost"
-                size="icon"
-                onClick={() => onDelete(character)}
-                aria-label={t("deleteCharacter")}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={onAdd}
-          className="flex min-h-80 w-full flex-col items-center justify-center rounded-xl border border-zinc-200 border-dashed text-center hover:bg-zinc-50"
-        >
-          <Users className="size-6 text-zinc-300" />
-          <span className="mt-3 font-medium text-sm">{t("addFirstCharacter")}</span>
-          <span className="mt-1 text-xs text-zinc-400">{t("characterEmptyDescription")}</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
 function OutlineSetupSection({
   chapters,
   onAdd,
@@ -1597,20 +1449,6 @@ function OutlineSetupSection({
           <span className="mt-1 text-xs text-zinc-400">{t("setupOutlineEmptyDescription")}</span>
         </button>
       )}
-    </div>
-  );
-}
-
-function AssistantPanelHeader({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="flex h-16 shrink-0 items-center gap-2.5 border-zinc-200 border-b px-4">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100">
-        <Bot className="size-4 text-zinc-600" />
-      </span>
-      <div className="min-w-0">
-        <h2 className="truncate font-semibold text-sm text-zinc-900">{title}</h2>
-        <p className="mt-0.5 truncate text-[11px] text-zinc-400">{subtitle}</p>
-      </div>
     </div>
   );
 }
