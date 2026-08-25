@@ -613,12 +613,55 @@ function splitChapterWindows(content: string, tokenLimit: number) {
   return splitTextWindowsByTokens(normalized, tokenLimit);
 }
 
+function stripInlineMarkdown(value: string) {
+  return value
+    .replace(/!\[([^\]]*)\](?:\([^)]+\)|\[[^\]]*\])/g, "$1")
+    .replace(/\[([^\]]+)](?:\([^)]+\)|\[[^\]]*\])/g, "$1")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/~~([^~\n]+)~~/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/_([^_\n]+)_/g, "$1")
+    .replace(/`+([^`\n]+)`+/g, "$1")
+    .replace(/<\/?[A-Za-z][^>]*>/g, "")
+    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, "$1");
+}
+
+function sanitizePlainRevisionBody(content: string) {
+  return content
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .flatMap((line) => {
+      if (/^\s*(?:```|~~~)/.test(line)) return [];
+      if (/^\s*(?:[-*_]\s*){3,}$/.test(line)) return [""];
+      if (/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(line)) return [];
+      let plain = line
+        .replace(/^\s*(?:>\s*)+/, "")
+        .replace(/^\s*(?:[-+*]|\d+[.)])\s+/, "")
+        .replace(/^\s*\[[ xX]\]\s+/, "")
+        .replace(/^\s*#{1,6}\s+/, "")
+        .replace(/^(?: {4}|\t)+/, "");
+      if (/^\s*\|.*\|\s*$/.test(plain)) {
+        plain = plain
+          .trim()
+          .slice(1, -1)
+          .split("|")
+          .map((cell) => cell.trim())
+          .join(" ");
+      }
+      return [stripInlineMarkdown(plain).replace(/\s{2,}$/, "")];
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function copiedWindowOutput(
   chapterTitle: string,
   chapterWindowIndex: number,
   sourceContent: string,
 ) {
-  return `${chapterWindowIndex === 0 ? `## ${chapterTitle}\n\n` : ""}${sourceContent}`.trim();
+  const body = sanitizePlainRevisionBody(sourceContent);
+  return `${chapterWindowIndex === 0 ? `## ${stripInlineMarkdown(chapterTitle)}\n\n` : ""}${body}`.trim();
 }
 
 function sanitizeGeneratedFragment(
@@ -635,7 +678,18 @@ function sanitizeGeneratedFragment(
   normalized = normalized
     .split(/\r?\n/)
     .filter((line) => !/^#\s+/.test(line))
+    .reduce<string[]>((lines, line) => {
+      const heading = line.match(/^\s*##\s+(.+?)\s*#*\s*$/);
+      if (heading) {
+        lines.push(`## ${stripInlineMarkdown(heading[1]).trim()}`);
+        return lines;
+      }
+      const body = sanitizePlainRevisionBody(line);
+      lines.push(body);
+      return lines;
+    }, [])
     .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
   if (isFirstDocumentWindow && normalized && !/^##\s+/m.test(normalized))
     normalized = `## ${sourceChapterTitle}\n\n${normalized}`;
@@ -842,7 +896,7 @@ export async function runProjectRevisionExecution(
         `Ends source chapter: ${current.chapterWindowIndex === current.chapterWindowCount - 1 ? "yes" : "no"}`,
         `Ends source document: ${current.documentWindowIndex === current.documentWindowCount - 1 ? "yes" : "no"}`,
       ].join("\n");
-      const system = `You are revising a fiction manuscript through sequential, non-overlapping source windows. Follow the approved Markdown revision blueprint as the global authority and apply any supplied style_rewrite_requirements to the prose. Return only the revised Markdown fragment corresponding to the current source window—no commentary, JSON, XML, or code fences. The application supplies the project H1, so never output an H1. Start a revised chapter with an H2 heading (## Title); when continuing the current revised chapter, output prose without repeating its heading. You may merge or split adjacent source chapters, retitle chapters, add locally relevant material, condense, or omit material according to the blueprint. Preserve forward source order and do not repeat text from previous output. Previous and next tails are read-only continuity context and must not be reproduced. If the entire current window should produce no text, return exactly <omit/>. On the final source window, make sure locally pending additions from the blueprint are completed.${outputLanguage ? ` Write the revised manuscript in ${outputLanguage}.` : ""}`;
+      const system = `You are revising a fiction manuscript through sequential, non-overlapping source windows. Follow the approved Markdown revision blueprint as the global authority and apply any supplied style_rewrite_requirements to the prose. Return only the revised text fragment corresponding to the current source window—no commentary, JSON, XML, or code fences. Use Markdown syntax only for chapter headings, written exactly as an H2 heading (## Title). Every prose line must be plain text: do not use emphasis, bold, strikethrough, inline code, links, images, block quotes, lists, tables, thematic breaks, task boxes, code blocks, escaped Markdown punctuation, or any other Markdown construct. The application supplies the project H1, so never output an H1. Start a revised chapter with its H2 heading; when continuing the current revised chapter, output plain prose without repeating its heading. You may merge or split adjacent source chapters, retitle chapters, add locally relevant material, condense, or omit material according to the blueprint. Preserve forward source order and do not repeat text from previous output. Previous and next tails are read-only continuity context and must not be reproduced. If the entire current window should produce no text, return exactly <omit/>. On the final source window, make sure locally pending additions from the blueprint are completed.${outputLanguage ? ` Write the revised manuscript in ${outputLanguage}.` : ""}`;
       const styleInstructions = mergeStyleInstructions(
         revision.styleFingerprintConfig
           ? { name: revision.styleFingerprintName, config: revision.styleFingerprintConfig }
