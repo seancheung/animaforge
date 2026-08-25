@@ -477,6 +477,10 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
       </div>
     );
   const { chapter, project } = currentDetail;
+  const alwaysIncludedEntityIds = currentDetail.allEntities
+    .filter((entity) => entity.alwaysInclude)
+    .map((entity) => entity.id);
+  const selectedEntityIdsDraft = [...new Set([...alwaysIncludedEntityIds, ...entityIdsDraft])];
   const visibleBlocks =
     view === "outline" ? blocks.filter((block) => block.type === "text") : blocks;
   const selectedBlock = blocks.find((block) => block.id === selectedId);
@@ -855,15 +859,32 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
                 {t("selectEntities")}
               </p>
               <MultiSelect
-                values={entityIdsDraft}
-                onChange={setEntityIdsDraft}
-                options={currentDetail.allEntities.map((entity) => ({
-                  value: entity.id,
-                  label: entity.name,
-                  description: entity.type.systemKey
+                values={selectedEntityIdsDraft}
+                lockedValues={alwaysIncludedEntityIds}
+                onChange={(entityIds) =>
+                  setEntityIdsDraft([
+                    ...new Set([
+                      ...entityIds.filter((entityId) =>
+                        alwaysIncludedEntityIds.every((lockedId) => lockedId !== entityId),
+                      ),
+                      ...entityIdsDraft.filter((entityId) =>
+                        alwaysIncludedEntityIds.includes(entityId),
+                      ),
+                    ]),
+                  ])
+                }
+                options={currentDetail.allEntities.map((entity) => {
+                  const typeLabel = entity.type.systemKey
                     ? entitiesT(`systemTypes.${entity.type.systemKey}` as never)
-                    : entity.type.name,
-                }))}
+                    : entity.type.name;
+                  return {
+                    value: entity.id,
+                    label: entity.name,
+                    description: entity.alwaysInclude
+                      ? `${typeLabel} · ${entitiesT("alwaysIncluded")}`
+                      : typeLabel,
+                  };
+                })}
                 emptyLabel={t("noProjectEntities")}
               />
             </div>
