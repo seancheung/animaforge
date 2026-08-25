@@ -2,17 +2,20 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   ArrowUpDown,
   Bot,
   Download,
   FileUp,
   Fingerprint,
   KeyRound,
+  LoaderCircle,
   MessageSquareQuote,
   Pencil,
   Plus,
   Server,
   Settings2,
+  Square,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -47,6 +50,10 @@ interface FingerprintForm {
   config: string;
   fileName: string;
 }
+
+type FingerprintStep = "sample" | "result";
+type FingerprintExtractionStatus = "idle" | "streaming" | "completed" | "stopped";
+type FingerprintCreationMode = "manual" | "extract";
 
 interface SettingsImportCandidate {
   name: string;
@@ -128,6 +135,15 @@ export function SettingsClient({
   const [reviewerForm, setReviewerForm] = useState<ReviewerPrompt | null>(null);
   const [reviewerDeleteTarget, setReviewerDeleteTarget] = useState<ReviewerPrompt | null>(null);
   const [fingerprintForm, setFingerprintForm] = useState<FingerprintForm | null>(null);
+  const [fingerprintCreationMode, setFingerprintCreationMode] =
+    useState<FingerprintCreationMode>("extract");
+  const [fingerprintStep, setFingerprintStep] = useState<FingerprintStep>("sample");
+  const [fingerprintExtractionStatus, setFingerprintExtractionStatus] =
+    useState<FingerprintExtractionStatus>("idle");
+  const [fingerprintReasoning, setFingerprintReasoning] = useState("");
+  const fingerprintExtractionController = useRef<AbortController | null>(null);
+  const fingerprintReasoningRef = useRef<HTMLPreElement>(null);
+  const fingerprintOutputRef = useRef<HTMLPreElement>(null);
   const [fingerprintDeleteTarget, setFingerprintDeleteTarget] = useState<StyleFingerprint | null>(
     null,
   );
@@ -177,6 +193,18 @@ export function SettingsClient({
     }, 600);
     return () => window.clearTimeout(timer);
   }, [draft, persistSettings]);
+
+  useEffect(() => () => fingerprintExtractionController.current?.abort(), []);
+
+  // Keep streamed reasoning and output pinned to the latest model delta.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Stream text is intentionally used only as an update trigger.
+  useEffect(() => {
+    if (fingerprintExtractionStatus !== "streaming") return;
+    if (fingerprintReasoningRef.current)
+      fingerprintReasoningRef.current.scrollTop = fingerprintReasoningRef.current.scrollHeight;
+    if (fingerprintOutputRef.current)
+      fingerprintOutputRef.current.scrollTop = fingerprintOutputRef.current.scrollHeight;
+  }, [fingerprintExtractionStatus, fingerprintReasoning, fingerprintForm?.config]);
 
   const models = useMemo(
     () =>
@@ -243,23 +271,92 @@ export function SettingsClient({
     },
     onError: (error) => toast.error(error.message),
   });
-  const extractFingerprint = useMutation({
-    mutationFn: (form: FingerprintForm) =>
-      api<{ config: string }>("/api/style-fingerprints/extract", {
+  const extractFingerprint = async (form: FingerprintForm) => {
+    if (!form.sampleText.trim() || fingerprintExtractionController.current) return;
+    const controller = new AbortController();
+    fingerprintExtractionController.current = controller;
+    setFingerprintStep("result");
+    setFingerprintExtractionStatus("streaming");
+    setFingerprintReasoning("");
+    setFingerprintForm((current) => (current ? { ...current, config: "" } : current));
+    try {
+      const response = await fetch("/api/style-fingerprints/extract", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sampleText: form.sampleText,
           instructions: form.instructions,
           modelId: draft.taskModels.styleFingerprint || null,
           outputLanguage: draft.language,
         }),
-      }),
-    onSuccess: ({ config }) =>
-      setFingerprintForm((current) =>
-        current ? { ...current, config, sampleText: "", instructions: "", fileName: "" } : current,
-      ),
-    onError: (error) => toast.error(error.message),
-  });
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: unknown };
+        throw new Error(
+          typeof body.error === "string" ? body.error : t("fingerprintExtractionFailed"),
+        );
+      }
+      if (!response.body) throw new Error(t("fingerprintStreamUnavailable"));
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = false;
+      const processLine = (line: string) => {
+        if (!line.trim()) return;
+        const event = JSON.parse(line) as
+          | { type: "delta" | "reasoning_delta"; text: string }
+          | { type: "complete" }
+          | { type: "error"; message: string };
+        if (event.type === "delta")
+          setFingerprintForm((current) =>
+            current ? { ...current, config: current.config + event.text } : current,
+          );
+        if (event.type === "reasoning_delta")
+          setFingerprintReasoning((current) => current + event.text);
+        if (event.type === "complete") completed = true;
+        if (event.type === "error") throw new Error(event.message);
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
+        for (const line of lines) processLine(line);
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) processLine(buffer);
+      if (!completed) throw new Error(t("fingerprintStreamInterrupted"));
+      setFingerprintExtractionStatus("completed");
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        if (fingerprintExtractionController.current === controller)
+          setFingerprintExtractionStatus("stopped");
+      } else {
+        setFingerprintExtractionStatus("stopped");
+        toast.error(error instanceof Error ? error.message : t("fingerprintExtractionFailed"));
+      }
+    } finally {
+      if (fingerprintExtractionController.current === controller)
+        fingerprintExtractionController.current = null;
+    }
+  };
+  const stopFingerprintExtraction = () => {
+    const controller = fingerprintExtractionController.current;
+    fingerprintExtractionController.current = null;
+    setFingerprintExtractionStatus("stopped");
+    controller?.abort();
+  };
+  const closeFingerprintForm = () => {
+    fingerprintExtractionController.current?.abort();
+    fingerprintExtractionController.current = null;
+    setFingerprintForm(null);
+    setFingerprintCreationMode("extract");
+    setFingerprintStep("sample");
+    setFingerprintExtractionStatus("idle");
+    setFingerprintReasoning("");
+  };
   const saveFingerprint = useMutation({
     mutationFn: (form: FingerprintForm) =>
       api<StyleFingerprint>(
@@ -271,7 +368,7 @@ export function SettingsClient({
       ),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ["settings"] });
-      setFingerprintForm(null);
+      closeFingerprintForm();
     },
     onError: (error) => toast.error(error.message),
   });
@@ -980,22 +1077,49 @@ export function SettingsClient({
                     <h2 className="font-semibold text-base">{t("fingerprintsTitle")}</h2>
                     <p className="mt-1 text-xs text-zinc-500">{t("fingerprintsDescription")}</p>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      setFingerprintForm({
-                        id: "",
-                        name: "",
-                        sampleText: "",
-                        instructions: "",
-                        config: "",
-                        fileName: "",
-                      })
-                    }
-                  >
-                    <Plus className="size-3.5" />
-                    {t("addFingerprint")}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setFingerprintCreationMode("extract");
+                        setFingerprintStep("sample");
+                        setFingerprintExtractionStatus("idle");
+                        setFingerprintReasoning("");
+                        setFingerprintForm({
+                          id: "",
+                          name: "",
+                          sampleText: "",
+                          instructions: "",
+                          config: "",
+                          fileName: "",
+                        });
+                      }}
+                    >
+                      <Fingerprint className="size-3.5" />
+                      {t("extractFingerprintStyle")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setFingerprintCreationMode("manual");
+                        setFingerprintStep("result");
+                        setFingerprintExtractionStatus("idle");
+                        setFingerprintReasoning("");
+                        setFingerprintForm({
+                          id: "",
+                          name: "",
+                          sampleText: "",
+                          instructions: "",
+                          config: "",
+                          fileName: "",
+                        });
+                      }}
+                    >
+                      <Plus className="size-3.5" />
+                      {t("addFingerprintConfig")}
+                    </Button>
+                  </div>
                 </div>
                 <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6">
                   <div className="divide-y divide-zinc-100">
@@ -1015,14 +1139,18 @@ export function SettingsClient({
                             size="icon"
                             variant="ghost"
                             aria-label={common("edit")}
-                            onClick={() =>
+                            onClick={() => {
+                              setFingerprintCreationMode("manual");
+                              setFingerprintStep("result");
+                              setFingerprintExtractionStatus("completed");
+                              setFingerprintReasoning("");
                               setFingerprintForm({
                                 ...fingerprint,
                                 sampleText: "",
                                 instructions: "",
                                 fileName: "",
-                              })
-                            }
+                              });
+                            }}
                           >
                             <Pencil className="size-3.5" />
                           </Button>
@@ -1334,35 +1462,69 @@ export function SettingsClient({
       <Modal
         open={Boolean(fingerprintForm)}
         onOpenChange={(open) => {
-          if (!open && !extractFingerprint.isPending && !saveFingerprint.isPending)
-            setFingerprintForm(null);
+          if (!open && !saveFingerprint.isPending) closeFingerprintForm();
         }}
-        title={fingerprintForm?.id ? t("editFingerprintTitle") : t("addFingerprintTitle")}
+        title={
+          fingerprintForm?.id
+            ? t("editFingerprintTitle")
+            : fingerprintCreationMode === "manual"
+              ? t("addFingerprintConfigTitle")
+              : t("extractFingerprintStyleTitle")
+        }
         width="max-w-2xl"
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
-            if (fingerprintForm) saveFingerprint.mutate(fingerprintForm);
+            if (!fingerprintForm) return;
+            if (
+              fingerprintForm.id ||
+              fingerprintCreationMode === "manual" ||
+              fingerprintExtractionStatus === "completed"
+            )
+              saveFingerprint.mutate(fingerprintForm);
+            else if (fingerprintStep === "sample") void extractFingerprint(fingerprintForm);
           }}
         >
-          <div className="scrollbar-thin max-h-[70vh] space-y-4 overflow-y-auto p-5">
-            <div>
-              <Label>{t("fingerprintName")}</Label>
-              <Input
-                autoFocus
-                required
-                value={fingerprintForm?.name ?? ""}
-                onChange={(event) =>
-                  setFingerprintForm((current) =>
-                    current ? { ...current, name: event.target.value } : current,
-                  )
-                }
-                placeholder={t("fingerprintNamePlaceholder")}
-              />
-            </div>
-            {!fingerprintForm?.id ? (
-              <>
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5">
+            {fingerprintForm?.id || fingerprintCreationMode === "manual" ? (
+              <div className="space-y-4">
+                <div>
+                  <Label>{t("fingerprintName")}</Label>
+                  <Input
+                    autoFocus
+                    required
+                    value={fingerprintForm?.name ?? ""}
+                    onChange={(event) =>
+                      setFingerprintForm((current) =>
+                        current ? { ...current, name: event.target.value } : current,
+                      )
+                    }
+                    placeholder={t("fingerprintNamePlaceholder")}
+                  />
+                </div>
+                <div>
+                  <Label>{t("fingerprintConfig")}</Label>
+                  <Textarea
+                    required
+                    className="min-h-64 font-mono text-xs leading-5"
+                    value={fingerprintForm?.config ?? ""}
+                    onChange={(event) =>
+                      setFingerprintForm((current) =>
+                        current ? { ...current, config: event.target.value } : current,
+                      )
+                    }
+                    placeholder={t("fingerprintConfigPlaceholder")}
+                  />
+                  <p className="mt-1.5 text-xs text-zinc-400">
+                    {t("fingerprintConfigDescription")}
+                  </p>
+                </div>
+              </div>
+            ) : fingerprintStep === "sample" ? (
+              <div className="space-y-4">
                 <div>
                   <div className="mb-1.5 flex items-center justify-between gap-3">
                     <Label>{t("sampleText")}</Label>
@@ -1390,8 +1552,9 @@ export function SettingsClient({
                     </label>
                   </div>
                   <Textarea
-                    required={!fingerprintForm?.config}
-                    className="min-h-48"
+                    autoFocus
+                    required
+                    className="min-h-56"
                     value={fingerprintForm?.sampleText ?? ""}
                     onChange={(event) =>
                       setFingerprintForm((current) =>
@@ -1407,7 +1570,7 @@ export function SettingsClient({
                 <div>
                   <Label>{t("extractionInstructions")}</Label>
                   <Textarea
-                    className="min-h-24"
+                    className="min-h-28"
                     value={fingerprintForm?.instructions ?? ""}
                     onChange={(event) =>
                       setFingerprintForm((current) =>
@@ -1417,49 +1580,142 @@ export function SettingsClient({
                     placeholder={t("extractionInstructionsPlaceholder")}
                   />
                 </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    loading={extractFingerprint.isPending}
-                    disabled={!fingerprintForm?.sampleText.trim()}
-                    onClick={() => fingerprintForm && extractFingerprint.mutate(fingerprintForm)}
-                  >
-                    <Fingerprint className="size-4" />
-                    {fingerprintForm?.config ? t("extractAgain") : t("extractFingerprint")}
-                  </Button>
-                </div>
-              </>
-            ) : null}
-            {fingerprintForm?.config || fingerprintForm?.id ? (
-              <div>
-                <Label>{t("fingerprintConfig")}</Label>
-                <Textarea
-                  required
-                  className="min-h-64 font-mono text-xs leading-5"
-                  value={fingerprintForm?.config ?? ""}
-                  onChange={(event) =>
-                    setFingerprintForm((current) =>
-                      current ? { ...current, config: event.target.value } : current,
-                    )
-                  }
-                  placeholder={t("fingerprintConfigPlaceholder")}
-                />
-                <p className="mt-1.5 text-xs text-zinc-400">{t("fingerprintConfigDescription")}</p>
               </div>
-            ) : null}
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <Label>{t("fingerprintName")}</Label>
+                  <Input
+                    autoFocus
+                    required
+                    value={fingerprintForm?.name ?? ""}
+                    onChange={(event) =>
+                      setFingerprintForm((current) =>
+                        current ? { ...current, name: event.target.value } : current,
+                      )
+                    }
+                    placeholder={t("fingerprintNamePlaceholder")}
+                  />
+                </div>
+                {fingerprintReasoning ? (
+                  <div>
+                    <Label>{t("fingerprintReasoning")}</Label>
+                    <pre
+                      ref={fingerprintReasoningRef}
+                      className="scrollbar-thin max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-500 leading-5"
+                    >
+                      {fingerprintReasoning}
+                    </pre>
+                  </div>
+                ) : null}
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <Label>{t("fingerprintConfig")}</Label>
+                    {fingerprintExtractionStatus === "streaming" ? (
+                      <span className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                        <LoaderCircle className="size-3 animate-spin" />
+                        {t("fingerprintExtracting")}
+                      </span>
+                    ) : fingerprintExtractionStatus === "stopped" ? (
+                      <span className="text-[11px] text-amber-600">
+                        {t("fingerprintExtractionStopped")}
+                      </span>
+                    ) : null}
+                  </div>
+                  {fingerprintExtractionStatus === "completed" ? (
+                    <Textarea
+                      required
+                      className="min-h-64 font-mono text-xs leading-5"
+                      value={fingerprintForm?.config ?? ""}
+                      onChange={(event) =>
+                        setFingerprintForm((current) =>
+                          current ? { ...current, config: event.target.value } : current,
+                        )
+                      }
+                      placeholder={t("fingerprintConfigPlaceholder")}
+                    />
+                  ) : (
+                    <pre
+                      ref={fingerprintOutputRef}
+                      className="scrollbar-thin max-h-80 min-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs text-zinc-700 leading-5"
+                    >
+                      {fingerprintForm?.config || t("fingerprintWaitingForOutput")}
+                    </pre>
+                  )}
+                  {fingerprintExtractionStatus === "completed" ? (
+                    <p className="mt-1.5 text-xs text-zinc-400">
+                      {t("fingerprintConfigDescription")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
-            <Button type="button" variant="secondary" onClick={() => setFingerprintForm(null)}>
-              {common("cancel")}
-            </Button>
-            <Button
-              type="submit"
-              loading={saveFingerprint.isPending}
-              disabled={!fingerprintForm?.name.trim() || !fingerprintForm?.config.trim()}
-            >
-              {common("save")}
-            </Button>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-zinc-100 border-t p-3">
+            {!fingerprintForm?.id &&
+            fingerprintCreationMode === "extract" &&
+            fingerprintStep === "result" ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  if (fingerprintExtractionStatus === "streaming") stopFingerprintExtraction();
+                  setFingerprintExtractionStatus("idle");
+                  setFingerprintStep("sample");
+                }}
+              >
+                <ArrowLeft className="size-4" />
+                {t("previousStep")}
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saveFingerprint.isPending}
+                onClick={closeFingerprintForm}
+              >
+                {common("cancel")}
+              </Button>
+              {fingerprintForm?.id || fingerprintCreationMode === "manual" ? (
+                <Button
+                  type="submit"
+                  loading={saveFingerprint.isPending}
+                  disabled={!fingerprintForm?.name.trim() || !fingerprintForm?.config.trim()}
+                >
+                  {common("save")}
+                </Button>
+              ) : fingerprintStep === "sample" ? (
+                <Button type="submit" disabled={!fingerprintForm?.sampleText.trim()}>
+                  <Fingerprint className="size-4" />
+                  {t("extractFingerprint")}
+                </Button>
+              ) : fingerprintExtractionStatus === "streaming" ? (
+                <Button type="button" variant="danger" onClick={stopFingerprintExtraction}>
+                  <Square className="size-3.5 fill-current" />
+                  {t("stopExtraction")}
+                </Button>
+              ) : fingerprintExtractionStatus === "completed" ? (
+                <Button
+                  type="submit"
+                  loading={saveFingerprint.isPending}
+                  disabled={!fingerprintForm?.name.trim() || !fingerprintForm?.config.trim()}
+                >
+                  {common("confirm")}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  disabled={!fingerprintForm?.sampleText.trim()}
+                  onClick={() => fingerprintForm && void extractFingerprint(fingerprintForm)}
+                >
+                  <Fingerprint className="size-4" />
+                  {t("extractAgain")}
+                </Button>
+              )}
+            </div>
           </div>
         </form>
       </Modal>
