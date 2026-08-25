@@ -20,9 +20,12 @@ export async function loadUsageReport(
 ): Promise<UsageReport> {
   const conn = await getDb();
   const usageQuery = conn("token_usage").orderBy("created_at", "asc");
-  if (days !== null)
+  const today = new Date();
+  const rangeEnd = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const rangeStart = days === null ? null : rangeEnd - (days - 1) * 24 * 60 * 60 * 1000;
+  if (rangeStart !== null)
     usageQuery.whereRaw("datetime(created_at) >= datetime(?)", [
-      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+      new Date(rangeStart).toISOString(),
     ]);
   if (project) usageQuery.where({ project_kind: project.kind, project_id: project.id });
   const [usageRows, priceRows] = await Promise.all([
@@ -43,6 +46,13 @@ export async function loadUsageReport(
   const featureGroups = new Map<string, MutableBreakdown>();
   const modelGroups = new Map<string, MutableBreakdown>();
   const dayGroups = new Map<string, MutableBreakdown>();
+
+  if (days !== null) {
+    for (let offset = days - 1; offset >= 0; offset -= 1) {
+      const day = new Date(rangeEnd - offset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      dayGroups.set(day, blank());
+    }
+  }
 
   const add = (target: MutableBreakdown, row: UsageRow, price: UsageRow | undefined) => {
     const input = numeric(row.input_tokens);

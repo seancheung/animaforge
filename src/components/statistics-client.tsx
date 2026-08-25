@@ -136,18 +136,22 @@ export function StatisticsClient() {
                       <h2 className="font-semibold text-sm">{t("dailyUsage")}</h2>
                       <p className="mt-1 text-xs text-zinc-500">{t("dailyUsageDescription")}</p>
                     </div>
-                    <div className="mt-6 flex h-44 items-end gap-1.5 overflow-hidden">
+                    <div
+                      className={`mt-6 flex h-44 items-end overflow-hidden ${report.byDay.length > 90 ? "gap-0" : "gap-1.5"}`}
+                    >
                       {report.byDay.map((item) => {
                         const total = tokenVolume(item);
                         return (
                           <div
                             key={item.day}
-                            className="group flex h-full min-w-1 flex-1 flex-col justify-end"
+                            className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end"
                             title={`${item.day}: ${formatCompactNumber(total)}`}
                           >
                             <div
-                              className="relative min-h-1 rounded-sm bg-zinc-900/80 transition group-hover:bg-zinc-950"
-                              style={{ height: `${Math.max(2, (total / maxDaily) * 100)}%` }}
+                              className="relative w-full max-w-8 rounded-sm bg-zinc-900/80 transition group-hover:bg-zinc-950"
+                              style={{
+                                height: total ? `${Math.max(2, (total / maxDaily) * 100)}%` : 0,
+                              }}
                             />
                           </div>
                         );
