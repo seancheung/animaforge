@@ -1,15 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, BookOpen, Plus, Search, Trash2, Upload, Users } from "lucide-react";
+import { ArrowUpRight, BookOpen, Copy, Plus, Search, Trash2, Upload, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { HomeSidebar } from "@/components/home-sidebar";
+import { ProjectTransferSelectionList } from "@/components/project-transfer-selection";
 import { Button, ConfirmDialog, Input, Label, Modal, Textarea } from "@/components/ui";
 import { api } from "@/lib/client";
+import {
+  allProjectTransferSections,
+  hasProjectTransferSelection,
+  type ProjectTransferSelection,
+} from "@/lib/project-transfer-selection";
 import type { Project } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -23,6 +29,7 @@ interface ProjectImportCandidate {
   chats: number;
   reviews: number;
   revisions: number;
+  assistants: number;
 }
 
 interface ProjectImportResult {
@@ -35,6 +42,7 @@ interface ProjectImportResult {
     chats: number;
     reviews: number;
     revisions: number;
+    assistantConversations: number;
   };
 }
 
@@ -49,6 +57,11 @@ export function HomeClient() {
   const [importCandidate, setImportCandidate] = useState<ProjectImportCandidate | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const [deleteProject, setDeleteProject] = useState<Project | null>(null);
+  const [cloneTarget, setCloneTarget] = useState<Project | null>(null);
+  const [cloneName, setCloneName] = useState("");
+  const [cloneSelection, setCloneSelection] = useState<ProjectTransferSelection>({
+    ...allProjectTransferSections,
+  });
   const [form, setForm] = useState({ name: "", synopsis: "", proseStyle: "", language: "" });
   const projects = useQuery({
     queryKey: ["projects"],
@@ -68,6 +81,21 @@ export function HomeClient() {
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ["projects"] });
       setDeleteProject(null);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const cloneProject = useMutation({
+    mutationFn: ({ project, name }: { project: Project; name: string }) =>
+      api<ProjectImportResult>(`/api/projects/${project.id}/clone`, {
+        method: "POST",
+        body: JSON.stringify({ name, selection: cloneSelection }),
+      }),
+    onSuccess: (result) => {
+      client.invalidateQueries({ queryKey: ["projects"] });
+      setCloneTarget(null);
+      setCloneName("");
+      toast.success(t("cloneSuccess", { name: result.project.name }));
+      router.push(`/projects/${result.project.id}`);
     },
     onError: (error) => toast.error(error.message),
   });
@@ -114,6 +142,9 @@ export function HomeClient() {
       const chats = Array.isArray(project.chats) ? project.chats : [];
       const reviews = Array.isArray(project.completedReviews) ? project.completedReviews : [];
       const revisions = Array.isArray(project.completedRevisions) ? project.completedRevisions : [];
+      const assistants = Array.isArray(project.assistantConversations)
+        ? project.assistantConversations
+        : [];
       const blocks = chapters.reduce(
         (count, chapter) =>
           count +
@@ -134,11 +165,17 @@ export function HomeClient() {
         chats: chats.length,
         reviews: reviews.length,
         revisions: revisions.length,
+        assistants: assistants.length,
       });
     } catch {
       toast.error(t("invalidImportFile"));
       if (importFileRef.current) importFileRef.current.value = "";
     }
+  };
+  const openClone = (project: Project) => {
+    setCloneTarget(project);
+    setCloneName(t("cloneDefaultName", { name: project.name }));
+    setCloneSelection({ ...allProjectTransferSections });
   };
   const filtered = useMemo(
     () =>
@@ -233,15 +270,24 @@ export function HomeClient() {
                   <div className="flex size-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700">
                     <BookOpen className="size-4.5" />
                   </div>
-                  <Button
-                    className="relative z-10"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setDeleteProject(project)}
-                    aria-label={t("deleteProject")}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <div className="relative z-10 flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openClone(project)}
+                      aria-label={t("cloneProject")}
+                    >
+                      <Copy className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setDeleteProject(project)}
+                      aria-label={t("deleteProject")}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
                 </div>
                 <h2 className="mt-5 truncate font-semibold text-base text-zinc-950">
                   {project.name}
@@ -331,6 +377,59 @@ export function HomeClient() {
         </form>
       </Modal>
       <Modal
+        open={Boolean(cloneTarget)}
+        onOpenChange={(open) => {
+          if (!open && !cloneProject.isPending) setCloneTarget(null);
+        }}
+        title={t("cloneTitle")}
+        description={t("cloneDescription")}
+        width="max-w-2xl"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!cloneTarget || !cloneName.trim() || !hasProjectTransferSelection(cloneSelection))
+              return;
+            cloneProject.mutate({ project: cloneTarget, name: cloneName.trim() });
+          }}
+        >
+          <div className="space-y-5 p-5">
+            <div>
+              <Label>{t("projectName")}</Label>
+              <Input
+                autoFocus
+                required
+                value={cloneName}
+                onChange={(event) => setCloneName(event.target.value)}
+              />
+            </div>
+            <ProjectTransferSelectionList
+              value={cloneSelection}
+              onChange={setCloneSelection}
+              disabled={cloneProject.isPending}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={cloneProject.isPending}
+              onClick={() => setCloneTarget(null)}
+            >
+              {common("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              loading={cloneProject.isPending}
+              disabled={!cloneName.trim() || !hasProjectTransferSelection(cloneSelection)}
+            >
+              <Copy className="size-4" />
+              {t("cloneProject")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+      <Modal
         open={Boolean(importCandidate)}
         onOpenChange={(open) => {
           if (!open && !importProject.isPending) {
@@ -356,6 +455,7 @@ export function HomeClient() {
                 chats: importCandidate?.chats ?? 0,
                 reviews: importCandidate?.reviews ?? 0,
                 revisions: importCandidate?.revisions ?? 0,
+                assistants: importCandidate?.assistants ?? 0,
               })}
             </p>
           </div>
