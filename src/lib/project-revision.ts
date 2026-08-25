@@ -349,6 +349,98 @@ export async function createProjectRevision(
   return loadProjectRevision(id);
 }
 
+export async function cloneProjectRevisionBlueprint(
+  revisionId: string,
+  name?: string,
+): Promise<ProjectRevisionDetail> {
+  const conn = await getDb();
+  const clonedRevisionId = newId();
+  const clonedBlueprintId = newId();
+
+  await conn.transaction(async (trx) => {
+    const sourceRevision = (await trx("project_revisions").where({ id: revisionId }).first()) as
+      | Row
+      | undefined;
+    if (!sourceRevision) throw new ApiError("revisionNotFound", 404);
+    if (!sourceRevision.active_blueprint_id) throw new ApiError("revisionBlueprintMissing", 409);
+
+    const [sourceBlueprint, sourceChapters] = await Promise.all([
+      trx("project_revision_blueprints")
+        .where({
+          id: sourceRevision.active_blueprint_id,
+          revision_id: revisionId,
+          status: "completed",
+        })
+        .first() as Promise<Row | undefined>,
+      trx("project_revision_source_chapters")
+        .where({ revision_id: revisionId })
+        .orderBy("sort_order", "asc") as Promise<Row[]>,
+    ]);
+    if (!sourceBlueprint || !String(sourceBlueprint.content ?? "").trim())
+      throw new ApiError("revisionBlueprintMissing", 409);
+    if (!sourceChapters.length) throw new ApiError("revisionSourceEmpty", 409);
+
+    await trx("project_revisions").insert({
+      id: clonedRevisionId,
+      project_id: sourceRevision.project_id,
+      source_type: sourceRevision.source_type,
+      style_fingerprint_id: sourceRevision.style_fingerprint_id,
+      style_fingerprint_name: sourceRevision.style_fingerprint_name,
+      style_fingerprint_config: sourceRevision.style_fingerprint_config,
+      review_id: sourceRevision.review_id,
+      name: name?.trim() || `${String(sourceRevision.name)} Copy`,
+      source_project_name: sourceRevision.source_project_name,
+      reviewer_name: sourceRevision.reviewer_name,
+      scope_chapter_id: sourceRevision.scope_chapter_id,
+      scope_chapter_title: sourceRevision.scope_chapter_title,
+      review_content: sourceRevision.review_content,
+      requirements: sourceRevision.requirements,
+      plan_model_id: sourceBlueprint.model_id,
+      execution_model_id: null,
+      active_blueprint_id: clonedBlueprintId,
+      result_markdown: "",
+      status: "blueprint_ready",
+      window_token_limit: null,
+      execution_window_tokens: null,
+    });
+    await trx("project_revision_source_chapters").insert(
+      sourceChapters.map((chapter) => ({
+        id: newId(),
+        revision_id: clonedRevisionId,
+        source_chapter_id: chapter.source_chapter_id,
+        title: chapter.title,
+        sort_order: chapter.sort_order,
+        source_content: chapter.source_content,
+      })),
+    );
+    await trx("project_revision_blueprints").insert({
+      id: clonedBlueprintId,
+      revision_id: clonedRevisionId,
+      version: 1,
+      model_id: sourceBlueprint.model_id,
+      requirements: sourceBlueprint.requirements,
+      content: sourceBlueprint.content,
+      status: "completed",
+    });
+  });
+
+  return loadProjectRevision(clonedRevisionId);
+}
+
+export async function renameProjectRevision(
+  revisionId: string,
+  name: string,
+): Promise<ProjectRevisionDetail> {
+  const normalizedName = name.trim();
+  if (!normalizedName) throw new ApiError("revisionNameRequired", 400);
+  const conn = await getDb();
+  const updated = await conn("project_revisions")
+    .where({ id: revisionId })
+    .update({ name: normalizedName, updated_at: conn.fn.now() });
+  if (!updated) throw new ApiError("revisionNotFound", 404);
+  return loadProjectRevision(revisionId);
+}
+
 export async function deleteProjectRevision(revisionId: string) {
   const conn = await getDb();
   const revision = (await conn("project_revisions").where({ id: revisionId }).first()) as

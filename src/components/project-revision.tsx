@@ -2,12 +2,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftFromLine,
+  Copy,
   Download,
   FilePenLine,
   FileText,
   ListChecks,
   ListTree,
   Pause,
+  Pencil,
   Play,
   Plus,
   RotateCcw,
@@ -100,6 +102,10 @@ export function ProjectRevisionWorkspace({
   const [planPreview, setPlanPreview] = useState("");
   const [planReasoning, setPlanReasoning] = useState("");
   const [planGeneratingRevisionId, setPlanGeneratingRevisionId] = useState<string | null>(null);
+  const [cloneTarget, setCloneTarget] = useState<ProjectRevisionDetail | null>(null);
+  const [cloneRevisionName, setCloneRevisionName] = useState("");
+  const [renameTarget, setRenameTarget] = useState<ProjectRevisionDetail | null>(null);
+  const [renamedRevisionName, setRenamedRevisionName] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState<RevisionDownloadFormat>("markdown");
   const [deleteTarget, setDeleteTarget] = useState<ProjectRevisionSummary | null>(null);
@@ -239,6 +245,53 @@ export function ProjectRevisionWorkspace({
       router.push(`/projects/${projectId}/revisions?revision=${encodeURIComponent(revision.id)}`, {
         scroll: false,
       });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const openCloneDialog = (revision: ProjectRevisionDetail) => {
+    setCloneTarget(revision);
+    setCloneRevisionName(t("cloneName", { name: revision.name }));
+  };
+
+  const cloneBlueprint = useMutation({
+    mutationFn: ({ revisionId, name }: { revisionId: string; name: string }) =>
+      api<ProjectRevisionDetail>(`/api/revisions/${revisionId}/clone`, {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: async (revision) => {
+      setCloneTarget(null);
+      setCloneRevisionName("");
+      setSelectedRevisionId(revision.id);
+      setRevisionView("blueprint");
+      client.setQueryData(["project-revision", revision.id], revision);
+      await client.invalidateQueries({ queryKey: ["project-revisions", projectId] });
+      router.push(`/projects/${projectId}/revisions?revision=${encodeURIComponent(revision.id)}`, {
+        scroll: false,
+      });
+      toast.success(t("blueprintCloned"));
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const openRenameDialog = (revision: ProjectRevisionDetail) => {
+    setRenameTarget(revision);
+    setRenamedRevisionName(revision.name);
+  };
+
+  const renameRevision = useMutation({
+    mutationFn: ({ revisionId, name }: { revisionId: string; name: string }) =>
+      api<ProjectRevisionDetail>(`/api/revisions/${revisionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: async (revision) => {
+      setRenameTarget(null);
+      setRenamedRevisionName("");
+      client.setQueryData(["project-revision", revision.id], revision);
+      await client.invalidateQueries({ queryKey: ["project-revisions", projectId] });
+      toast.success(t("renamed"));
     },
     onError: (error) => toast.error(error.message),
   });
@@ -510,7 +563,20 @@ export function ProjectRevisionWorkspace({
           <>
             <header className="flex h-14 shrink-0 items-center justify-between border-zinc-200 border-b px-5">
               <div className="min-w-0">
-                <h2 className="truncate font-semibold text-sm">{activeRevision.name}</h2>
+                <div className="flex min-w-0 items-center gap-1">
+                  <h2 className="truncate font-semibold text-sm">{activeRevision.name}</h2>
+                  <Tooltip label={t("rename")}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-7 shrink-0 text-zinc-400"
+                      onClick={() => openRenameDialog(activeRevision)}
+                      aria-label={t("rename")}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                  </Tooltip>
+                </div>
                 <p className="mt-0.5 truncate text-[11px] text-zinc-400">
                   {activeRevision.sourceType === "review"
                     ? activeRevision.reviewerName
@@ -568,6 +634,26 @@ export function ProjectRevisionWorkspace({
                     <Play className="size-3.5" />
                     {t("continue")}
                   </Button>
+                ) : null}
+                {[
+                  "blueprint_ready",
+                  "executing",
+                  "paused",
+                  "execution_failed",
+                  "completed",
+                ].includes(activeRevision.status) &&
+                activeRevision.activeBlueprint?.status === "completed" &&
+                activeRevision.activeBlueprint.content.trim() ? (
+                  <Tooltip label={t("cloneBlueprint")}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => openCloneDialog(activeRevision)}
+                      aria-label={t("cloneBlueprint")}
+                    >
+                      <Copy className="size-4" />
+                    </Button>
+                  </Tooltip>
                 ) : null}
                 <Tooltip label={t("download")}>
                   <Button
@@ -806,6 +892,98 @@ export function ProjectRevisionWorkspace({
               loading={createRevision.isPending}
             >
               {t("create")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+      <Modal
+        open={Boolean(renameTarget)}
+        onOpenChange={(open) => {
+          if (!open && !renameRevision.isPending) setRenameTarget(null);
+        }}
+        title={t("renameTitle")}
+        description={t("renameDescription")}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!renameTarget || !renamedRevisionName.trim()) return;
+            renameRevision.mutate({
+              revisionId: renameTarget.id,
+              name: renamedRevisionName.trim(),
+            });
+          }}
+        >
+          <div className="p-5">
+            <Label>{t("name")}</Label>
+            <Input
+              autoFocus
+              required
+              value={renamedRevisionName}
+              onChange={(event) => setRenamedRevisionName(event.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={renameRevision.isPending}
+              onClick={() => setRenameTarget(null)}
+            >
+              {common("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={!renamedRevisionName.trim()}
+              loading={renameRevision.isPending}
+            >
+              {t("rename")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+      <Modal
+        open={Boolean(cloneTarget)}
+        onOpenChange={(open) => {
+          if (!open && !cloneBlueprint.isPending) setCloneTarget(null);
+        }}
+        title={t("cloneBlueprint")}
+        description={t("cloneDescription")}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!cloneTarget || !cloneRevisionName.trim()) return;
+            cloneBlueprint.mutate({
+              revisionId: cloneTarget.id,
+              name: cloneRevisionName.trim(),
+            });
+          }}
+        >
+          <div className="p-5">
+            <Label>{t("name")}</Label>
+            <Input
+              autoFocus
+              required
+              value={cloneRevisionName}
+              onChange={(event) => setCloneRevisionName(event.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={cloneBlueprint.isPending}
+              onClick={() => setCloneTarget(null)}
+            >
+              {common("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={!cloneRevisionName.trim()}
+              loading={cloneBlueprint.isPending}
+            >
+              {t("cloneBlueprint")}
             </Button>
           </div>
         </form>
