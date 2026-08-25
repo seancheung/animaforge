@@ -100,6 +100,7 @@ export async function generateModelText({
   });
   let buffer = "";
   let content = "";
+  let finishReason: string | null = null;
 
   const processLine = async (line: string) => {
     if (!line.startsWith("data:")) return;
@@ -108,9 +109,11 @@ export async function generateModelText({
     let event: {
       choices?: Array<{
         delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+        finish_reason?: unknown;
       }>;
       type?: unknown;
-      delta?: { type?: unknown; text?: unknown; thinking?: unknown };
+      delta?: { type?: unknown; text?: unknown; thinking?: unknown; stop_reason?: unknown };
+      message?: { stop_reason?: unknown };
     };
     try {
       event = JSON.parse(data) as typeof event;
@@ -118,6 +121,11 @@ export async function generateModelText({
       return;
     }
     usage.observe(event);
+    const nextFinishReason =
+      service.type === "openai"
+        ? event.choices?.[0]?.finish_reason
+        : (event.delta?.stop_reason ?? event.message?.stop_reason);
+    if (typeof nextFinishReason === "string" && nextFinishReason) finishReason = nextFinishReason;
     const text =
       service.type === "openai"
         ? event.choices?.[0]?.delta?.content
@@ -156,5 +164,7 @@ export async function generateModelText({
   } finally {
     await usage.commit();
   }
+  if (finishReason === "length" || finishReason === "max_tokens")
+    throw new ApiError("modelOutputTokenLimit", 502);
   return preserveWhitespace ? content : content.trim();
 }

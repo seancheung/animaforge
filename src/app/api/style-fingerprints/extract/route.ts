@@ -50,7 +50,7 @@ export async function POST(request: Request) {
           feature: "styleFingerprint",
           system,
           prompt,
-          maxTokens: settings.replyCaps.styleFingerprint ?? 2_000,
+          maxTokens: settings.replyCaps.styleFingerprint ?? undefined,
           signal: abortController.signal,
           onDelta: (text) => send({ type: "delta", text }),
           onReasoningDelta: (text) => send({ type: "reasoning_delta", text }),

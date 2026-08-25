@@ -52,7 +52,7 @@ interface FingerprintForm {
 }
 
 type FingerprintStep = "sample" | "result";
-type FingerprintExtractionStatus = "idle" | "streaming" | "completed" | "stopped";
+type FingerprintExtractionStatus = "idle" | "streaming" | "completed" | "stopped" | "failed";
 type FingerprintCreationMode = "manual" | "extract";
 
 interface SettingsImportCandidate {
@@ -141,6 +141,7 @@ export function SettingsClient({
   const [fingerprintExtractionStatus, setFingerprintExtractionStatus] =
     useState<FingerprintExtractionStatus>("idle");
   const [fingerprintReasoning, setFingerprintReasoning] = useState("");
+  const [fingerprintExtractionError, setFingerprintExtractionError] = useState("");
   const fingerprintExtractionController = useRef<AbortController | null>(null);
   const fingerprintReasoningRef = useRef<HTMLPreElement>(null);
   const fingerprintOutputRef = useRef<HTMLPreElement>(null);
@@ -278,6 +279,7 @@ export function SettingsClient({
     setFingerprintStep("result");
     setFingerprintExtractionStatus("streaming");
     setFingerprintReasoning("");
+    setFingerprintExtractionError("");
     setFingerprintForm((current) => (current ? { ...current, config: "" } : current));
     try {
       const response = await fetch("/api/style-fingerprints/extract", {
@@ -334,8 +336,10 @@ export function SettingsClient({
         if (fingerprintExtractionController.current === controller)
           setFingerprintExtractionStatus("stopped");
       } else {
-        setFingerprintExtractionStatus("stopped");
-        toast.error(error instanceof Error ? error.message : t("fingerprintExtractionFailed"));
+        const message = error instanceof Error ? error.message : t("fingerprintExtractionFailed");
+        setFingerprintExtractionStatus("failed");
+        setFingerprintExtractionError(message);
+        toast.error(message);
       }
     } finally {
       if (fingerprintExtractionController.current === controller)
@@ -356,6 +360,7 @@ export function SettingsClient({
     setFingerprintStep("sample");
     setFingerprintExtractionStatus("idle");
     setFingerprintReasoning("");
+    setFingerprintExtractionError("");
   };
   const saveFingerprint = useMutation({
     mutationFn: (form: FingerprintForm) =>
@@ -1625,6 +1630,10 @@ export function SettingsClient({
                     ) : fingerprintExtractionStatus === "stopped" ? (
                       <span className="text-[11px] text-amber-600">
                         {t("fingerprintExtractionStopped")}
+                      </span>
+                    ) : fingerprintExtractionStatus === "failed" ? (
+                      <span className="text-[11px] text-red-600">
+                        {fingerprintExtractionError || t("fingerprintExtractionFailed")}
                       </span>
                     ) : null}
                   </div>
