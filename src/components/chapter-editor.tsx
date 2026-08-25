@@ -58,6 +58,7 @@ import {
   Input,
   Label,
   Modal,
+  MultiSelect,
   Select,
   Switch,
   Textarea,
@@ -130,6 +131,7 @@ function countCharacters(value: string) {
 
 export function ChapterEditor({ chapterId }: { chapterId: string }) {
   const t = useTranslations("Chapter");
+  const entitiesT = useTranslations("Entities");
   const common = useTranslations("Common");
   const client = useQueryClient();
   const query = useQuery({
@@ -147,6 +149,8 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
   const [generation, setGeneration] = useState<GenerateTarget | null>(null);
   const [entityDialogOpen, setEntityDialogOpen] = useState(false);
+  const [entityModeDraft, setEntityModeDraft] = useState<"all" | "selected">("selected");
+  const [entityIdsDraft, setEntityIdsDraft] = useState<string[]>([]);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
   const [entityForm, setEntityForm] = useState({ name: "", description: "" });
   const [synopsisBlock, setSynopsisBlock] = useState<Block | null>(null);
@@ -733,13 +737,19 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setEntityDialogOpen(true)}
+                  onClick={() => {
+                    setEntityModeDraft(chapter.entityMode);
+                    setEntityIdsDraft(chapter.entityIds);
+                    setEntityDialogOpen(true);
+                  }}
                   aria-label={t("editRelatedEntities")}
                 >
                   <Pencil className="size-3.5" />
                 </Button>
               </div>
-              {currentDetail.entities.length ? (
+              {chapter.entityMode === "all" ? (
+                <p className="text-xs text-zinc-500">{t("allEntitiesShort")}</p>
+              ) : currentDetail.entities.length ? (
                 <div className="flex flex-wrap gap-1.5">
                   {currentDetail.entities.map((entity) => (
                     <button
@@ -828,65 +838,56 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
       </ResizablePanel>
       <Modal
         open={entityDialogOpen}
-        onOpenChange={setEntityDialogOpen}
+        onOpenChange={(open) => !updateChapter.isPending && setEntityDialogOpen(open)}
         title={t("relatedEntitiesTitle")}
         width="max-w-md"
       >
         <div className="space-y-5 p-5">
           <Switch
-            checked={chapter.entityMode === "all"}
-            onChange={(checked) =>
-              updateChapter.mutate({
-                entityMode: checked ? "all" : "selected",
-                entityIds: chapter.entityIds,
-              })
-            }
+            checked={entityModeDraft === "all"}
+            onChange={(checked) => setEntityModeDraft(checked ? "all" : "selected")}
             label={t("allEntities")}
             description={t("allEntitiesDescription")}
           />
-          <div className="border-zinc-100 border-t pt-4">
-            <p className="mb-3 font-semibold text-xs text-zinc-400 uppercase tracking-wider">
-              {t("selectEntities")}
-            </p>
-            {currentDetail.allEntities.length ? (
-              <div className="space-y-1.5">
-                {currentDetail.allEntities.map((entity) => {
-                  const checked =
-                    chapter.entityMode === "all" || chapter.entityIds.includes(entity.id);
-                  return (
-                    <button
-                      key={entity.id}
-                      type="button"
-                      disabled={chapter.entityMode === "all" || updateChapter.isPending}
-                      onClick={() => {
-                        const ids = checked
-                          ? chapter.entityIds.filter((id) => id !== entity.id)
-                          : [...chapter.entityIds, entity.id];
-                        updateChapter.mutate({ entityMode: "selected", entityIds: ids });
-                      }}
-                      className="focus-ring flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-zinc-50 disabled:cursor-default disabled:opacity-50"
-                    >
-                      <span
-                        className={cn(
-                          "flex size-4 shrink-0 items-center justify-center rounded border",
-                          checked
-                            ? "border-zinc-950 bg-zinc-950 text-white"
-                            : "border-zinc-300 bg-white",
-                        )}
-                      >
-                        {checked ? <Check className="size-3" /> : null}
-                      </span>
-                      <span className="min-w-0 truncate font-medium">{entity.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="rounded-lg border border-zinc-200 border-dashed px-4 py-10 text-center text-sm text-zinc-400">
-                {t("noProjectEntities")}
+          {entityModeDraft === "selected" ? (
+            <div className="border-zinc-100 border-t pt-4">
+              <p className="mb-3 font-semibold text-xs text-zinc-400 uppercase tracking-wider">
+                {t("selectEntities")}
               </p>
-            )}
-          </div>
+              <MultiSelect
+                values={entityIdsDraft}
+                onChange={setEntityIdsDraft}
+                options={currentDetail.allEntities.map((entity) => ({
+                  value: entity.id,
+                  label: entity.name,
+                  description: entity.type.systemKey
+                    ? entitiesT(`systemTypes.${entity.type.systemKey}` as never)
+                    : entity.type.name,
+                }))}
+                emptyLabel={t("noProjectEntities")}
+              />
+            </div>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <Button
+            variant="secondary"
+            disabled={updateChapter.isPending}
+            onClick={() => setEntityDialogOpen(false)}
+          >
+            {common("cancel")}
+          </Button>
+          <Button
+            loading={updateChapter.isPending}
+            onClick={() =>
+              updateChapter.mutate(
+                { entityMode: entityModeDraft, entityIds: entityIdsDraft },
+                { onSuccess: () => setEntityDialogOpen(false) },
+              )
+            }
+          >
+            {common("confirm")}
+          </Button>
         </div>
       </Modal>
       <Modal

@@ -599,7 +599,8 @@ export async function listAssistantResources(
   const conn = await getDb();
   const project = (await conn("projects").where({ id: projectId }).first()) as Row | undefined;
   if (!project) throw new ApiError("projectNotFound", 404);
-  const normalized = query.trim().toLocaleLowerCase();
+  const trimmedQuery = query.trim();
+  const normalized = trimmedQuery.toLocaleLowerCase();
   const matches = (value: unknown) =>
     !normalized ||
     String(value ?? "")
@@ -633,6 +634,43 @@ export async function listAssistantResources(
   const attachments = (await conn("assistant_attachments")
     .where({ conversation_id: conversation.id })
     .orderBy("created_at", "asc")) as Row[];
+
+  const blockChapter = [...chapters]
+    .filter((row) => String(row.title).trim())
+    .sort((left, right) => String(right.title).length - String(left.title).length)
+    .find((row) => normalized.startsWith(`${String(row.title).trim().toLocaleLowerCase()}#`));
+  if (blockChapter) {
+    const chapterTitle = String(blockChapter.title).trim();
+    const blockFilter = trimmedQuery
+      .slice(chapterTitle.length + 1)
+      .trim()
+      .toLocaleLowerCase();
+    return blocks
+      .filter((row) => row.chapter_id === blockChapter.id)
+      .map((row) => {
+        const siblings = blocks.filter(
+          (candidate) => candidate.chapter_id === row.chapter_id && candidate.type === row.type,
+        );
+        const blockNumber = siblings.findIndex((candidate) => candidate.id === row.id) + 1;
+        return {
+          type: "block" as const,
+          id: String(row.id),
+          label: blockReferenceLabel(row.chapter_title, row.type, blockNumber),
+          description:
+            row.type === "checkpoint"
+              ? `Checkpoint ${String(blockNumber).padStart(2, "0")}`
+              : `Text ${String(blockNumber).padStart(2, "0")}`,
+        };
+      })
+      .filter(
+        (row) =>
+          !blockFilter ||
+          row.label.toLocaleLowerCase().includes(blockFilter) ||
+          row.description.toLocaleLowerCase().includes(blockFilter),
+      )
+      .slice(0, 24);
+  }
+
   return [
     ...chapters
       .filter((row) => matches(row.title) || matches(row.synopsis))
@@ -666,23 +704,6 @@ export async function listAssistantResources(
         label: String(row.name),
         description: t("attachment"),
       })),
-    ...blocks
-      .map((row) => {
-        const siblings = blocks.filter(
-          (candidate) => candidate.chapter_id === row.chapter_id && candidate.type === row.type,
-        );
-        const blockNumber = siblings.findIndex((candidate) => candidate.id === row.id) + 1;
-        return {
-          type: "block" as const,
-          id: String(row.id),
-          label: blockReferenceLabel(row.chapter_title, row.type, blockNumber),
-          description:
-            row.type === "checkpoint"
-              ? `Checkpoint ${String(blockNumber).padStart(2, "0")}`
-              : `Text ${String(blockNumber).padStart(2, "0")}`,
-        };
-      })
-      .filter((row) => matches(row.label) || matches(row.description)),
   ].slice(0, 24);
 }
 

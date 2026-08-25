@@ -307,8 +307,8 @@ exports.up = async function up(knex) {
     table.text("name").notNullable();
     table.text("source_project_name").notNullable();
     table.text("reviewer_name").notNullable();
-    table.text("review_chapter_id");
-    table.text("review_chapter_title");
+    table.text("scope_chapter_id");
+    table.text("scope_chapter_title");
     table.text("review_content").notNullable();
     table.text("requirements").notNullable().defaultTo("");
     table.text("plan_model_id");

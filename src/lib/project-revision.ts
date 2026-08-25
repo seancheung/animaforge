@@ -75,8 +75,8 @@ function mapSummary(
     name: String(row.name),
     sourceProjectName: String(row.source_project_name),
     reviewerName: String(row.reviewer_name),
-    reviewChapterId: row.review_chapter_id ? String(row.review_chapter_id) : null,
-    reviewChapterTitle: row.review_chapter_title ? String(row.review_chapter_title) : null,
+    scopeChapterId: row.scope_chapter_id ? String(row.scope_chapter_id) : null,
+    scopeChapterTitle: row.scope_chapter_title ? String(row.scope_chapter_title) : null,
     requirements: String(row.requirements ?? ""),
     styleFingerprintId: row.style_fingerprint_id ? String(row.style_fingerprint_id) : null,
     styleFingerprintName: String(row.style_fingerprint_name ?? ""),
@@ -243,6 +243,7 @@ export async function createProjectRevision(
   name: string,
   requirements: string,
   styleFingerprintId: string,
+  chapterId: string,
 ): Promise<ProjectRevisionDetail> {
   const conn = await getDb();
   const normalizedReviewId = sourceType === "review" ? reviewId.trim() : "";
@@ -273,8 +274,22 @@ export async function createProjectRevision(
   if (sourceType === "custom" && !normalizedRequirements)
     throw new ApiError("revisionRequirementsRequired", 400);
 
+  const requestedScopeChapterId =
+    sourceType === "review"
+      ? reviewRow?.chapter_id
+        ? String(reviewRow.chapter_id)
+        : ""
+      : chapterId.trim();
+  const scopeChapter = requestedScopeChapterId
+    ? chapterRows.find((chapter) => String(chapter.id) === requestedScopeChapterId)
+    : undefined;
+  if (requestedScopeChapterId && !scopeChapter) throw new ApiError("chapterNotFound", 404);
+
+  const sourceChapterRows = requestedScopeChapterId
+    ? chapterRows.filter((chapter) => String(chapter.id) === requestedScopeChapterId)
+    : chapterRows;
   const snapshots = await Promise.all(
-    chapterRows.map(async (chapter) => {
+    sourceChapterRows.map(async (chapter) => {
       const blocks = await loadBlocks(String(chapter.id));
       const content = blocks
         .filter((block) => block.type === "text")
@@ -291,7 +306,9 @@ export async function createProjectRevision(
       };
     }),
   );
-  if (!snapshots.some((chapter) => chapter.content)) throw new ApiError("revisionSourceEmpty");
+  if (!snapshots.some((chapter) => chapter.content)) {
+    throw new ApiError("revisionSourceEmpty");
+  }
 
   const id = newId();
   const revisionName =
@@ -305,8 +322,12 @@ export async function createProjectRevision(
       name: revisionName,
       source_project_name: String(projectRow.name),
       reviewer_name: reviewRow ? String(reviewRow.reviewer_name) : "",
-      review_chapter_id: reviewRow?.chapter_id ? String(reviewRow.chapter_id) : null,
-      review_chapter_title: reviewRow?.chapter_title ? String(reviewRow.chapter_title) : null,
+      scope_chapter_id: requestedScopeChapterId || null,
+      scope_chapter_title: scopeChapter
+        ? String(scopeChapter.title)
+        : reviewRow?.chapter_title
+          ? String(reviewRow.chapter_title)
+          : null,
       review_content: reviewRow ? String(reviewRow.content) : "",
       requirements: normalizedRequirements,
       style_fingerprint_id: styleFingerprintRow ? normalizedStyleFingerprintId : null,
@@ -440,11 +461,8 @@ export async function generateProjectRevisionBlueprint(
   });
 
   const outputLanguage = project.language.trim() || settings.language.trim();
-  const scopedChapterIndex = sourceChapters.findIndex(
-    (chapter) => chapter.sourceChapterId === String(revisionRow.review_chapter_id),
-  );
-  const scope = revisionRow.review_chapter_id
-    ? `The review covers only source chapter ${scopedChapterIndex + 1} (${String(revisionRow.review_chapter_title ?? "")}). The application will preserve every other source chapter verbatim. Limit the blueprint to revising this chapter and its transitions; do not redesign unrelated chapters.`
+  const scope = revisionRow.scope_chapter_id
+    ? `The revision covers only the selected chapter (${String(revisionRow.scope_chapter_title ?? "")}). The supplied source document and final result contain only this chapter. Limit the blueprint to revising this chapter; do not introduce or discuss unrelated chapters.`
     : revisionRow.review_id
       ? "The review covers the complete manuscript. The blueprint may merge or split adjacent chapters, add chapters, retitle chapters, expand, condense, or remove material while keeping the source's overall forward order."
       : "No review was selected. Apply the user's additional requirements to the complete manuscript. The blueprint may merge or split adjacent chapters, add chapters, retitle chapters, expand, condense, or remove material while keeping the source's overall forward order.";
@@ -551,7 +569,7 @@ async function materializeWindows(revision: ProjectRevisionDetail, windowTokens:
   const definitions = revision.sourceChapters.flatMap((chapter, chapterIndex) => {
     const chunks = splitChapterWindows(chapter.sourceContent, windowTokens);
     const mode =
-      revision.reviewChapterId && revision.reviewChapterId !== chapter.sourceChapterId
+      revision.scopeChapterId && revision.scopeChapterId !== chapter.sourceChapterId
         ? "copy"
         : "generate";
     return chunks.map((sourceContent, chapterWindowIndex) => ({

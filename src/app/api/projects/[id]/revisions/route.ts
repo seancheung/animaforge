@@ -22,6 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       name?: string;
       requirements?: string;
       styleFingerprintId?: string | null;
+      chapterId?: string | null;
     }>(request);
     return ok(
       await createProjectRevision(
@@ -31,6 +32,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         body.name ?? "",
         body.requirements ?? "",
         body.styleFingerprintId ?? "",
+        body.chapterId ?? "",
       ),
       { status: 201 },
     );

@@ -17,7 +17,7 @@ import {
   useInteractions,
   useRole,
 } from "@floating-ui/react";
-import { Check, ChevronDown, LoaderCircle, Minus, Plus, X } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Minus, Plus, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -455,6 +455,174 @@ export function Select({
                   <Plus className="size-3.5" />
                   {action.label}
                 </button>
+              ) : null}
+            </div>
+          </div>
+        </FloatingPortal>
+      ) : null}
+    </>
+  );
+}
+
+export function MultiSelect({
+  values,
+  onChange,
+  options,
+  placeholder,
+  emptyLabel,
+  lockedValues = [],
+  className,
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  emptyLabel?: string;
+  lockedValues?: string[];
+  className?: string;
+}) {
+  const t = useTranslations("Common");
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const { refs, floatingStyles, context } = useFloating({
+    open,
+    onOpenChange: setOpen,
+    placement: "bottom-start",
+    whileElementsMounted: autoUpdate,
+    middleware: [
+      offset(5),
+      flip(),
+      shift({ padding: 8 }),
+      size({
+        apply({ rects, elements }) {
+          Object.assign(elements.floating.style, {
+            width: `${Math.max(rects.reference.width, 224)}px`,
+          });
+        },
+      }),
+    ],
+  });
+  const { getReferenceProps, getFloatingProps } = useInteractions([
+    useClick(context),
+    useDismiss(context, { outsidePressEvent: "pointerdown" }),
+    useRole(context, { role: "listbox" }),
+  ]);
+  const menuMounted = useCssPresence(open, 100);
+  const selectedLabels = options
+    .filter((option) => values.includes(option.value))
+    .map((option) => option.label);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredOptions = normalizedQuery
+    ? options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery))
+    : options;
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      const reference = refs.reference.current;
+      const floating = refs.floating.current;
+      if (
+        (reference instanceof Element && reference.contains(target)) ||
+        floating?.contains(target)
+      )
+        return;
+
+      setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+  }, [open, refs.floating, refs.reference]);
+
+  return (
+    <>
+      <button
+        ref={refs.setReference}
+        type="button"
+        className={cn(
+          "focus-ring flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 text-left text-sm",
+          className,
+        )}
+        title={selectedLabels.join(", ")}
+        {...getReferenceProps()}
+      >
+        <span className={cn("truncate", !selectedLabels.length && "text-zinc-400")}>
+          {selectedLabels.length ? selectedLabels.join(", ") : (placeholder ?? t("select"))}
+        </span>
+        <ChevronDown className="size-3.5 shrink-0 text-zinc-400" />
+      </button>
+      {menuMounted ? (
+        <FloatingPortal>
+          <div
+            ref={refs.setFloating}
+            style={floatingStyles}
+            className="z-[70]"
+            {...getFloatingProps()}
+          >
+            <div
+              data-state={open ? "open" : "closed"}
+              aria-multiselectable="true"
+              className="popover-panel max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-xl"
+            >
+              <div className="sticky top-0 z-10 bg-white p-1">
+                <div className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white px-2.5">
+                  <Search className="size-3.5 shrink-0 text-zinc-400" />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={t("searchOptions")}
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-400"
+                  />
+                </div>
+              </div>
+              {filteredOptions.map((option) => {
+                const selected = values.includes(option.value);
+                const locked = lockedValues.includes(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={locked}
+                    className={cn(
+                      "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-zinc-100",
+                      locked && "cursor-default opacity-60",
+                    )}
+                    onClick={() =>
+                      onChange(
+                        selected
+                          ? values.filter((value) => value !== option.value)
+                          : [...values, option.value],
+                      )
+                    }
+                  >
+                    <Check
+                      className={cn(
+                        "mt-0.5 size-3.5 shrink-0",
+                        selected ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <span className="min-w-0 truncate text-sm text-zinc-800">
+                      {option.label}
+                      {option.description ? (
+                        <span className="text-zinc-400"> · {option.description}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+              {!filteredOptions.length ? (
+                <div className="px-3 py-5 text-center text-xs text-zinc-400">
+                  {options.length ? t("noMatchingOptions") : (emptyLabel ?? t("noOptions"))}
+                </div>
               ) : null}
             </div>
           </div>

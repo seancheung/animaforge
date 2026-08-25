@@ -1,13 +1,12 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeftFromLine, BookOpen, Download, FileText, ListTree } from "lucide-react";
+import { ArrowLeftFromLine, BookOpen, ListTree } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { Button, Modal, Tooltip } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { api } from "@/lib/client";
 import type { Project } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 interface ProjectPreviewBlock {
   id: string;
@@ -24,8 +23,6 @@ interface ProjectPreview {
   chapters: ProjectPreviewChapter[];
 }
 
-type PreviewDownloadFormat = "markdown" | "txt";
-
 export function ProjectPreviewWorkspace({
   projectId,
   project,
@@ -35,8 +32,6 @@ export function ProjectPreviewWorkspace({
 }) {
   const t = useTranslations("Project");
   const [tocOpen, setTocOpen] = useState(false);
-  const [downloadOpen, setDownloadOpen] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<PreviewDownloadFormat>("markdown");
   const contentRef = useRef<HTMLDivElement | null>(null);
   const preview = useQuery({
     queryKey: ["project-preview", projectId],
@@ -52,30 +47,6 @@ export function ProjectPreviewWorkspace({
     heading.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const openDownloadDialog = () => {
-    setDownloadFormat("markdown");
-    setDownloadOpen(true);
-  };
-
-  const downloadPreview = () => {
-    if (!chapters.length) return;
-    const content =
-      downloadFormat === "markdown"
-        ? previewMarkdown(project.name, chapters)
-        : previewText(project.name, chapters);
-    const extension = downloadFormat === "markdown" ? "md" : "txt";
-    const blob = new Blob(["\uFEFF", content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${safeFileName(project.name)}.${extension}`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    setDownloadOpen(false);
-  };
-
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-white">
       <header className="flex h-14 shrink-0 items-center justify-between border-zinc-200 border-b px-6">
@@ -83,24 +54,11 @@ export function ProjectPreviewWorkspace({
           <h1 className="truncate font-semibold text-sm">{t("preview")}</h1>
           <p className="mt-0.5 truncate text-[11px] text-zinc-400">{t("previewDescription")}</p>
         </div>
-        <div className="flex items-center gap-2">
-          {preview.data ? (
-            <span className="text-xs text-zinc-400">
-              {t("previewChapterCount", { count: chapters.length })}
-            </span>
-          ) : null}
-          <Tooltip label={t("downloadPreview")}>
-            <Button
-              size="icon"
-              variant="ghost"
-              disabled={!chapters.length}
-              onClick={openDownloadDialog}
-              aria-label={t("downloadPreview")}
-            >
-              <Download className="size-4" />
-            </Button>
-          </Tooltip>
-        </div>
+        {preview.data ? (
+          <span className="text-xs text-zinc-400">
+            {t("previewChapterCount", { count: chapters.length })}
+          </span>
+        ) : null}
       </header>
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <AnimatePresence initial={false}>
@@ -215,95 +173,6 @@ export function ProjectPreviewWorkspace({
           <ListTree className="size-4" />
         </button>
       ) : null}
-      <Modal
-        open={downloadOpen}
-        onOpenChange={setDownloadOpen}
-        title={t("downloadPreviewTitle")}
-        description={t("downloadPreviewDescription")}
-        width="max-w-sm"
-      >
-        <div className="space-y-2 p-5" role="radiogroup" aria-label={t("downloadFormat")}>
-          {(["markdown", "txt"] as const).map((format) => (
-            <button
-              key={format}
-              type="button"
-              role="radio"
-              aria-checked={downloadFormat === format}
-              onClick={() => setDownloadFormat(format)}
-              className={cn(
-                "focus-ring flex w-full items-center gap-3 rounded-xl border p-3 text-left transition",
-                downloadFormat === format
-                  ? "border-zinc-950 bg-zinc-50 ring-1 ring-zinc-950"
-                  : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50",
-              )}
-            >
-              <span
-                className={cn(
-                  "flex size-9 shrink-0 items-center justify-center rounded-lg",
-                  downloadFormat === format
-                    ? "bg-zinc-950 text-white"
-                    : "bg-zinc-100 text-zinc-500",
-                )}
-              >
-                <FileText className="size-4" />
-              </span>
-              <span>
-                <span className="block font-medium text-sm text-zinc-900">
-                  {t(format === "markdown" ? "formatMarkdown" : "formatText")}
-                </span>
-                <span className="mt-0.5 block text-xs text-zinc-400">
-                  .{format === "markdown" ? "md" : "txt"}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
-          <Button variant="secondary" onClick={() => setDownloadOpen(false)}>
-            {t("cancelDownload")}
-          </Button>
-          <Button onClick={downloadPreview}>
-            <Download className="size-4" />
-            {t("downloadPreview")}
-          </Button>
-        </div>
-      </Modal>
     </div>
-  );
-}
-
-function chapterContent(chapter: ProjectPreviewChapter) {
-  return chapter.blocks
-    .map((block) => block.content.trim())
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function previewMarkdown(projectName: string, chapters: ProjectPreviewChapter[]) {
-  const body = chapters
-    .map(
-      (chapter) =>
-        `## ${chapter.title}${chapterContent(chapter) ? `\n\n${chapterContent(chapter)}` : ""}`,
-    )
-    .join("\n\n");
-  return `# ${projectName}\n\n${body}`.trim();
-}
-
-function previewText(projectName: string, chapters: ProjectPreviewChapter[]) {
-  const body = chapters
-    .map(
-      (chapter) =>
-        `${chapter.title}${chapterContent(chapter) ? `\n\n${chapterContent(chapter)}` : ""}`,
-    )
-    .join("\n\n");
-  return `${projectName}\n\n${body}`.trim();
-}
-
-function safeFileName(value: string) {
-  return (
-    value
-      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
-      .replace(/[. ]+$/g, "")
-      .slice(0, 160) || "project"
   );
 }

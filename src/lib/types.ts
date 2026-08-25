@@ -360,8 +360,8 @@ export interface ProjectRevisionSummary {
   name: string;
   sourceProjectName: string;
   reviewerName: string;
-  reviewChapterId: string | null;
-  reviewChapterTitle: string | null;
+  scopeChapterId: string | null;
+  scopeChapterTitle: string | null;
   requirements: string;
   styleFingerprintId: string | null;
   styleFingerprintName: string;

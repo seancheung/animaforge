@@ -39,6 +39,7 @@ import { ChapterEditor } from "@/components/chapter-editor";
 import { CharacterChatWorkspace } from "@/components/character-chat";
 import { CreativeAssistant } from "@/components/creative-assistant";
 import { EntityWorkspace } from "@/components/entity-workspace";
+import { ProjectExport } from "@/components/project-export";
 import { ProjectPreviewWorkspace } from "@/components/project-preview";
 import { ProjectReviewWorkspace } from "@/components/project-review";
 import { ProjectRevisionWorkspace } from "@/components/project-revision";
@@ -399,6 +400,7 @@ export function ProjectClient({
             projectId={projectId}
             initialRevisionId={initialRevisionId}
             project={project}
+            chapters={chapters}
           />
         ) : initialView === "entities" ? (
           <EntityWorkspace
@@ -869,14 +871,23 @@ function ProjectOverview({
     <div className="flex h-full min-h-0 bg-zinc-50">
       <section className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl space-y-7 px-7 pt-7 pb-8">
-          <div>
-            <p className="font-medium text-xs text-zinc-400 uppercase tracking-[.14em]">
-              {t("overview")}
-            </p>
-            <h1 className="mt-1 font-semibold text-2xl tracking-tight">{project.name}</h1>
-            <p className="mt-2 text-sm text-zinc-500 leading-6">
-              {project.synopsis || t("noProjectSynopsis")}
-            </p>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+            <div className="min-w-0">
+              <p className="font-medium text-xs text-zinc-400 uppercase tracking-[.14em]">
+                {t("overview")}
+              </p>
+              <h1 className="mt-1 font-semibold text-2xl tracking-tight">{project.name}</h1>
+              <p className="mt-2 text-sm text-zinc-500 leading-6">
+                {project.synopsis || t("noProjectSynopsis")}
+              </p>
+            </div>
+            <div className="shrink-0">
+              <ProjectExport
+                projectId={project.id}
+                projectName={project.name}
+                hasManuscript={stats.chaptersWithContent > 0}
+              />
+            </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <StatCard

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ClipboardPenLine, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ClipboardPenLine, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
@@ -83,6 +83,11 @@ export function ProjectReviewWorkspace({
     { value: "", label: t("allChapters") },
     ...chapters.map((chapter) => ({ value: chapter.id, label: chapter.title })),
   ];
+  const reviewerOptions =
+    settings.data?.settings.reviewerPrompts.map((reviewer) => ({
+      value: reviewer.id,
+      label: reviewer.name,
+    })) ?? [];
 
   useEffect(() => {
     if (!activeReviewId || initialReviewId === activeReviewId) return;
@@ -328,43 +333,10 @@ export function ProjectReviewWorkspace({
         <div className="scrollbar-thin max-h-[70vh] space-y-5 overflow-y-auto p-5">
           <div>
             <Label>{t("reviewer")}</Label>
-            <div className="space-y-2">
-              {settings.data?.settings.reviewerPrompts.map((reviewer) => (
-                <button
-                  key={reviewer.id}
-                  type="button"
-                  onClick={() => setReviewerId(reviewer.id)}
-                  className={cn(
-                    "flex w-full items-start gap-3 rounded-xl border p-3 text-left transition",
-                    reviewerId === reviewer.id
-                      ? "border-zinc-400 bg-zinc-50"
-                      : "border-zinc-200 hover:border-zinc-300",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
-                      reviewerId === reviewer.id
-                        ? "border-zinc-950 bg-zinc-950 text-white"
-                        : "border-zinc-300",
-                    )}
-                  >
-                    {reviewerId === reviewer.id ? <Check className="size-3" /> : null}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block font-medium text-sm">{reviewer.name}</span>
-                    <span className="mt-1 line-clamp-2 text-xs text-zinc-400 leading-5">
-                      {reviewer.prompt}
-                    </span>
-                  </span>
-                </button>
-              ))}
-              {!settings.isLoading && !settings.data?.settings.reviewerPrompts.length ? (
-                <p className="rounded-xl border border-zinc-200 border-dashed px-4 py-10 text-center text-xs text-zinc-400">
-                  {t("noReviewers")}
-                </p>
-              ) : null}
-            </div>
+            <Select value={reviewerId} onChange={setReviewerId} options={reviewerOptions} />
+            {!settings.isLoading && !reviewerOptions.length ? (
+              <p className="mt-2 text-amber-600 text-xs">{t("noReviewers")}</p>
+            ) : null}
           </div>
           <div>
             <Label>{t("modelOverride")}</Label>

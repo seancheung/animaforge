@@ -356,7 +356,7 @@ export function CreativeAssistant({
   };
 
   const updateMention = (value: string, caret: number) => {
-    const match = value.slice(0, caret).match(/@([^@\s]{0,40})$/);
+    const match = value.slice(0, caret).match(/@([^@\r\n]{0,200})$/);
     setMention(match ? { query: match[1], start: caret - match[0].length, end: caret } : null);
   };
 

@@ -32,6 +32,7 @@ import {
 import { api } from "@/lib/client";
 import type {
   AppSettings,
+  Chapter,
   LlmService,
   Project,
   ProjectReview,
@@ -66,10 +67,12 @@ export function ProjectRevisionWorkspace({
   projectId,
   initialRevisionId,
   project,
+  chapters,
 }: {
   projectId: string;
   initialRevisionId: string | null;
   project: Project;
+  chapters: Chapter[];
 }) {
   const t = useTranslations("Revision");
   const common = useTranslations("Common");
@@ -90,6 +93,7 @@ export function ProjectRevisionWorkspace({
   const [revisionName, setRevisionName] = useState("");
   const [createRequirements, setCreateRequirements] = useState("");
   const [createStyleFingerprintId, setCreateStyleFingerprintId] = useState("");
+  const [createChapterId, setCreateChapterId] = useState("");
   const [planModelId, setPlanModelId] = useState("");
   const [executionModelId, setExecutionModelId] = useState("");
   const [requirements, setRequirements] = useState("");
@@ -127,6 +131,11 @@ export function ProjectRevisionWorkspace({
   });
   const activeRevision = detail.data ?? null;
   const completedReviews = reviews.data?.filter((review) => review.status === "completed") ?? [];
+  const selectedCreateReview = completedReviews.find((review) => review.id === reviewId) ?? null;
+  const chapterOptions = [
+    { value: "", label: t("allChapters") },
+    ...chapters.map((chapter) => ({ value: chapter.id, label: chapter.title })),
+  ];
   const models = useMemo(
     () =>
       (settings.data?.services ?? []).flatMap((service) =>
@@ -204,6 +213,7 @@ export function ProjectRevisionWorkspace({
     );
     setCreateRequirements("");
     setCreateStyleFingerprintId("");
+    setCreateChapterId("");
     setCreateOpen(true);
   };
 
@@ -217,6 +227,7 @@ export function ProjectRevisionWorkspace({
           name: revisionName,
           requirements: revisionSource === "review" ? "" : createRequirements,
           styleFingerprintId: revisionSource === "style" ? createStyleFingerprintId || null : null,
+          chapterId: revisionSource === "review" ? null : createChapterId || null,
         }),
       }),
     onSuccess: async (revision) => {
@@ -506,7 +517,7 @@ export function ProjectRevisionWorkspace({
                     : activeRevision.sourceType === "style"
                       ? activeRevision.styleFingerprintName
                       : t("customRequirements")}{" "}
-                  · {activeRevision.reviewChapterTitle ?? t("allChapters")} ·{" "}
+                  · {activeRevision.scopeChapterTitle ?? t("allChapters")} ·{" "}
                   {formatDateTime(activeRevision.createdAt, locale)}
                 </p>
               </div>
@@ -750,6 +761,25 @@ export function ProjectRevisionWorkspace({
                 />
               </div>
             )}
+            <div>
+              <Label>{t("revisionScope")}</Label>
+              {revisionSource === "review" ? (
+                <>
+                  <div className="flex h-9 items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700">
+                    {selectedCreateReview?.chapterTitle ?? t("allChapters")}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-zinc-400 leading-5">
+                    {t("scopeFollowsReview")}
+                  </p>
+                </>
+              ) : (
+                <Select
+                  value={createChapterId}
+                  onChange={setCreateChapterId}
+                  options={chapterOptions}
+                />
+              )}
+            </div>
             <div>
               <Label>{t("name")}</Label>
               <Input

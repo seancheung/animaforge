@@ -20,7 +20,17 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button, ConfirmDialog, Input, Label, Modal, Switch, Tooltip } from "@/components/ui";
+import {
+  Button,
+  ConfirmDialog,
+  Input,
+  Label,
+  Modal,
+  MultiSelect,
+  Select,
+  Switch,
+  Tooltip,
+} from "@/components/ui";
 import { api } from "@/lib/client";
 import type {
   Chapter,
@@ -871,12 +881,15 @@ export function CharacterChatWorkspace({
           <div className="scrollbar-thin max-h-[65vh] space-y-6 overflow-y-auto p-5">
             <div>
               <Label>{t("members")}</Label>
-              <CharacterSelection
-                characters={characters}
-                selectedIds={memberIds}
-                onChange={(ids) => {
-                  setMemberIds(ids);
-                  if (userCharacterId && ids.includes(userCharacterId)) setUserCharacterId(null);
+              <MultiSelect
+                options={characters.map((character) => ({
+                  value: character.id,
+                  label: character.name,
+                }))}
+                values={memberIds}
+                onChange={(values) => {
+                  setMemberIds(values);
+                  if (userCharacterId && values.includes(userCharacterId)) setUserCharacterId(null);
                 }}
                 emptyLabel={t("noCharacters")}
               />
@@ -1127,64 +1140,6 @@ function MentionContent({ content, allLabel }: { content: string; allLabel: stri
   );
 }
 
-function CharacterSelection({
-  characters,
-  selectedIds,
-  onChange,
-  lockedIds = [],
-  emptyLabel,
-}: {
-  characters: Entity[];
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-  lockedIds?: string[];
-  emptyLabel: string;
-}) {
-  if (!characters.length)
-    return (
-      <p className="rounded-lg border border-zinc-200 border-dashed px-4 py-8 text-center text-xs text-zinc-400">
-        {emptyLabel}
-      </p>
-    );
-  return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {characters.map((character) => {
-        const selected = selectedIds.includes(character.id) || lockedIds.includes(character.id);
-        const locked = lockedIds.includes(character.id);
-        return (
-          <button
-            key={character.id}
-            type="button"
-            disabled={locked}
-            onClick={() =>
-              onChange(
-                selected
-                  ? selectedIds.filter((id) => id !== character.id)
-                  : [...selectedIds, character.id],
-              )
-            }
-            className={cn(
-              "flex items-center gap-3 rounded-lg border p-3 text-left transition",
-              selected ? "border-zinc-400 bg-zinc-50" : "border-zinc-200 hover:border-zinc-300",
-              locked && "cursor-default opacity-75",
-            )}
-          >
-            <span
-              className={cn(
-                "flex size-4 shrink-0 items-center justify-center rounded border",
-                selected ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-300",
-              )}
-            >
-              {selected ? <Check className="size-3" /> : null}
-            </span>
-            <span className="min-w-0 truncate font-medium text-sm">{character.name}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function IdentitySelection({
   characters,
   value,
@@ -1198,42 +1153,14 @@ function IdentitySelection({
   return (
     <div>
       <Label>{t("myIdentity")}</Label>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => onChange(null)}
-          className={cn(
-            "flex items-center gap-3 rounded-lg border p-3 text-left",
-            value === null ? "border-zinc-400 bg-zinc-50" : "border-zinc-200",
-          )}
-        >
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-white">
-            <UserRound className="size-3.5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block font-medium text-sm">{t("author")}</span>
-            <span className="block truncate text-xs text-zinc-400">
-              {t("authorIdentityDescription")}
-            </span>
-          </span>
-        </button>
-        {characters.map((character) => (
-          <button
-            key={character.id}
-            type="button"
-            onClick={() => onChange(character.id)}
-            className={cn(
-              "flex items-center gap-3 rounded-lg border p-3 text-left",
-              value === character.id ? "border-zinc-400 bg-zinc-50" : "border-zinc-200",
-            )}
-          >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 font-medium text-xs">
-              {character.name.slice(0, 1)}
-            </span>
-            <span className="min-w-0 truncate font-medium text-sm">{character.name}</span>
-          </button>
-        ))}
-      </div>
+      <Select
+        value={value ?? ""}
+        onChange={(id) => onChange(id || null)}
+        options={[
+          { value: "", label: t("author") },
+          ...characters.map((character) => ({ value: character.id, label: character.name })),
+        ]}
+      />
       <p className="mt-2 text-xs text-zinc-400">{t("identityCannotBeMember")}</p>
     </div>
   );
@@ -1255,6 +1182,7 @@ function ContextSettingsFields({
   chapters: Chapter[];
 }) {
   const t = useTranslations("CharacterChat");
+  const entitiesT = useTranslations("Entities");
   const lockedIds = [
     ...members.map((member) => member.id),
     ...(userCharacter ? [userCharacter.id] : []),
@@ -1272,9 +1200,9 @@ function ContextSettingsFields({
       </div>
       <div>
         <Label>{t("contextChapters")}</Label>
-        <SelectionList
-          items={chapters.map((chapter) => ({ id: chapter.id, label: chapter.title }))}
-          selectedIds={value.chapterIds}
+        <MultiSelect
+          options={chapters.map((chapter) => ({ value: chapter.id, label: chapter.title }))}
+          values={value.chapterIds}
           onChange={(chapterIds) => onChange({ ...value, chapterIds })}
           emptyLabel={t("noChapters")}
         />
@@ -1289,10 +1217,16 @@ function ContextSettingsFields({
       </div>
       <div>
         <Label>{t("contextEntities")}</Label>
-        <CharacterSelection
-          characters={entities}
-          selectedIds={selectedEntityIds}
-          lockedIds={lockedIds}
+        <MultiSelect
+          options={entities.map((entity) => ({
+            value: entity.id,
+            label: entity.name,
+            description: entity.type.systemKey
+              ? entitiesT(`systemTypes.${entity.type.systemKey}` as never)
+              : entity.type.name,
+          }))}
+          values={selectedEntityIds}
+          lockedValues={lockedIds}
           onChange={(entityIds) => onChange({ ...value, entityIds })}
           emptyLabel={t("noEntities")}
         />
@@ -1307,54 +1241,6 @@ function ContextSettingsFields({
           />
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function SelectionList({
-  items,
-  selectedIds,
-  onChange,
-  emptyLabel,
-}: {
-  items: Array<{ id: string; label: string }>;
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-  emptyLabel: string;
-}) {
-  if (!items.length)
-    return (
-      <p className="rounded-lg border border-zinc-200 border-dashed px-4 py-8 text-center text-xs text-zinc-400">
-        {emptyLabel}
-      </p>
-    );
-  return (
-    <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-zinc-200 p-2">
-      {items.map((item) => {
-        const selected = selectedIds.includes(item.id);
-        return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() =>
-              onChange(
-                selected ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id],
-              )
-            }
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-zinc-50"
-          >
-            <span
-              className={cn(
-                "flex size-4 shrink-0 items-center justify-center rounded border",
-                selected ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-300",
-              )}
-            >
-              {selected ? <Check className="size-3" /> : null}
-            </span>
-            <span className="min-w-0 truncate text-sm">{item.label}</span>
-          </button>
-        );
-      })}
     </div>
   );
 }
