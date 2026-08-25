@@ -27,16 +27,16 @@ function useCssPresence(open: boolean, exitDuration: number) {
 
   useEffect(() => {
     if (open) {
-      if (mounted) return;
-      const frame = window.requestAnimationFrame(() => setMounted(true));
-      return () => window.cancelAnimationFrame(frame);
+      if (!mounted) setMounted(true);
+      return;
     }
     if (!mounted) return;
     const timer = window.setTimeout(() => setMounted(false), exitDuration);
     return () => window.clearTimeout(timer);
   }, [exitDuration, mounted, open]);
 
-  return mounted;
+  // Mount on the opening render so the dialog does not lose a frame before its entrance animation.
+  return open || mounted;
 }
 
 export function Button({
