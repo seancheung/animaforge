@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api";
+import { formatEntityRelation } from "@/lib/entity-relation";
 import { mergeStyleInstructions } from "@/lib/style-fingerprint";
 import { type Block, type Chapter, type ChapterDetail, getBlockContent } from "@/lib/types";
 
@@ -82,6 +83,7 @@ export function buildPrompt(
   const block = detail.blocks.find((item) => item.id === blockId);
   if (options.mode !== "chapterSynopsis" && !block) throw new ApiError("blockNotFound", 404);
   const outputLanguage = detail.project.language.trim() || detail.settings.language.trim();
+  const entityNames = new Map(detail.entities.map((entity) => [entity.id, entity.name]));
 
   const project = [
     "<project>",
@@ -105,7 +107,15 @@ export function buildPrompt(
     ...detail.relations.map((relation) =>
       [
         `<relation id="${relation.id}" source_entity_id="${relation.sourceEntityId}" target_entity_id="${relation.targetEntityId}">`,
-        element("relation_name", relation.name),
+        element("relation_expression", relation.name),
+        element(
+          "relation_statement",
+          formatEntityRelation(
+            relation.name,
+            entityNames.get(relation.sourceEntityId) ?? relation.sourceEntityId,
+            entityNames.get(relation.targetEntityId) ?? relation.targetEntityId,
+          ),
+        ),
         element("relation_description", relation.description),
         "</relation>",
       ].join("\n"),

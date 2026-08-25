@@ -111,15 +111,16 @@ export function ProjectExport({
         title={t("exportProjectTitle")}
         description={t("exportProjectDescription")}
         width="max-w-2xl"
+        scrollable={false}
       >
-        <div className="p-5">
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5">
           <ProjectTransferSelectionList
             value={selection}
             onChange={setSelection}
             disabled={downloading === "project"}
           />
         </div>
-        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+        <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
           <Button
             variant="secondary"
             disabled={downloading === "project"}

@@ -1232,14 +1232,16 @@ export function SettingsClient({
           if (!open) setEditingServiceId(null);
         }}
         title={editingServiceId ? t("editServiceTitle") : t("addServiceTitle")}
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             saveService.mutate();
           }}
         >
-          <div className="space-y-4 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
               <Label>{t("name")}</Label>
               <Input
@@ -1290,7 +1292,7 @@ export function SettingsClient({
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button type="button" variant="secondary" onClick={() => setServiceOpen(false)}>
               {common("cancel")}
             </Button>
@@ -1311,14 +1313,16 @@ export function SettingsClient({
         title={editingModelId ? t("editModelTitle") : t("addModelTitle")}
         description={t("addModelDescription")}
         width="max-w-2xl"
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             saveModel.mutate();
           }}
         >
-          <div className="space-y-4 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
               <Label>{t("modelId")}</Label>
               <Input
@@ -1394,7 +1398,7 @@ export function SettingsClient({
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button
               type="button"
               variant="secondary"
@@ -1415,14 +1419,16 @@ export function SettingsClient({
         open={Boolean(reviewerForm)}
         onOpenChange={(open) => !open && setReviewerForm(null)}
         title={reviewerForm?.id ? t("editReviewerTitle") : t("addReviewerTitle")}
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             saveReviewer();
           }}
         >
-          <div className="space-y-4 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
               <Label>{t("reviewerName")}</Label>
               <Input
@@ -1451,7 +1457,7 @@ export function SettingsClient({
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button type="button" variant="secondary" onClick={() => setReviewerForm(null)}>
               {common("cancel")}
             </Button>

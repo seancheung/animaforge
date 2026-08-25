@@ -419,9 +419,10 @@ export function TranslationProjectClient({ projectId }: { projectId: string }) {
         title={t("createBlueprintTitle")}
         description={t("createBlueprintDescription")}
         width="max-w-3xl"
+        scrollable={false}
       >
         <BlueprintFormFields form={form} setForm={setForm} models={modelOptions} t={t} />
-        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+        <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
           <Button variant="secondary" onClick={() => setCreateOpen(false)}>
             {common("cancel")}
           </Button>
@@ -439,9 +440,10 @@ export function TranslationProjectClient({ projectId }: { projectId: string }) {
         onOpenChange={setConfigureOpen}
         title={t("configureBlueprint")}
         width="max-w-3xl"
+        scrollable={false}
       >
         <BlueprintFormFields form={form} setForm={setForm} models={modelOptions} t={t} />
-        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+        <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
           <Button variant="secondary" onClick={() => setConfigureOpen(false)}>
             {common("cancel")}
           </Button>
@@ -1464,7 +1466,7 @@ function BlueprintFormFields({
       ),
     });
   return (
-    <div className="scrollbar-thin max-h-[70vh] space-y-5 overflow-y-auto p-5">
+    <div className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label>{t("blueprintName")}</Label>

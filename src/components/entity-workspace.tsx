@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Boxes, GitBranch, Pencil, Plus, Search, Tags, Trash2 } from "lucide-react";
+import { Boxes, GitBranch, Pencil, Plus, Search, Tags, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -19,6 +19,11 @@ import {
   Textarea,
 } from "@/components/ui";
 import { api } from "@/lib/client";
+import {
+  formatEntityRelation,
+  sourceEntityPlaceholder,
+  targetEntityPlaceholder,
+} from "@/lib/entity-relation";
 import type { AssistantProposalItem, Entity, EntityRelation, EntityType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -382,17 +387,14 @@ export function EntityWorkspace({
                       onClick={() => openRelation(relation)}
                       className="w-full pr-16 text-left"
                     >
-                      <div className="flex flex-wrap items-center gap-2 font-medium text-sm">
+                      <div className="flex items-start gap-2 font-medium text-sm">
+                        <GitBranch className="mt-0.5 size-4 shrink-0 text-zinc-400" />
                         <span>
-                          {entityById.get(relation.sourceEntityId)?.name ?? t("missingEntity")}
-                        </span>
-                        <ArrowRight className="size-3.5 text-zinc-400" />
-                        <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs">
-                          {relation.name}
-                        </span>
-                        <ArrowRight className="size-3.5 text-zinc-400" />
-                        <span>
-                          {entityById.get(relation.targetEntityId)?.name ?? t("missingEntity")}
+                          {formatEntityRelation(
+                            relation.name,
+                            entityById.get(relation.sourceEntityId)?.name ?? t("missingEntity"),
+                            entityById.get(relation.targetEntityId)?.name ?? t("missingEntity"),
+                          )}
                         </span>
                       </div>
                       {relation.description ? (
@@ -406,7 +408,15 @@ export function EntityWorkspace({
                       variant="ghost"
                       size="icon"
                       onClick={() =>
-                        setDeleteTarget({ kind: "relation", id: relation.id, name: relation.name })
+                        setDeleteTarget({
+                          kind: "relation",
+                          id: relation.id,
+                          name: formatEntityRelation(
+                            relation.name,
+                            entityById.get(relation.sourceEntityId)?.name ?? t("missingEntity"),
+                            entityById.get(relation.targetEntityId)?.name ?? t("missingEntity"),
+                          ),
+                        })
                       }
                     >
                       <Trash2 className="size-3.5" />
@@ -586,20 +596,40 @@ export function EntityWorkspace({
         open={relationOpen}
         onOpenChange={setRelationOpen}
         title={editingRelation ? t("editRelation") : t("newRelation")}
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             saveRelation.mutate();
           }}
         >
-          <div className="space-y-4 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
-              <Label>{t("sourceEntity")}</Label>
+              <Label>
+                {t("sourceEntity")} <code className="text-zinc-400">{sourceEntityPlaceholder}</code>
+              </Label>
               <Select
                 value={relationDraft.sourceEntityId}
                 onChange={(sourceEntityId) =>
                   setRelationDraft({ ...relationDraft, sourceEntityId })
+                }
+                options={entities.map((entity) => ({
+                  value: entity.id,
+                  label: entity.name,
+                  description: typeName(entity.type),
+                }))}
+              />
+            </div>
+            <div>
+              <Label>
+                {t("targetEntity")} <code className="text-zinc-400">{targetEntityPlaceholder}</code>
+              </Label>
+              <Select
+                value={relationDraft.targetEntityId}
+                onChange={(targetEntityId) =>
+                  setRelationDraft({ ...relationDraft, targetEntityId })
                 }
                 options={entities.map((entity) => ({
                   value: entity.id,
@@ -616,22 +646,27 @@ export function EntityWorkspace({
                 onChange={(event) =>
                   setRelationDraft({ ...relationDraft, name: event.target.value })
                 }
-                placeholder={t("relationNamePlaceholder")}
+                placeholder={t("relationNamePlaceholder", {
+                  source: sourceEntityPlaceholder,
+                  target: targetEntityPlaceholder,
+                })}
               />
-            </div>
-            <div>
-              <Label>{t("targetEntity")}</Label>
-              <Select
-                value={relationDraft.targetEntityId}
-                onChange={(targetEntityId) =>
-                  setRelationDraft({ ...relationDraft, targetEntityId })
-                }
-                options={entities.map((entity) => ({
-                  value: entity.id,
-                  label: entity.name,
-                  description: typeName(entity.type),
-                }))}
-              />
+              <p className="mt-1.5 text-[11px] text-zinc-500 leading-4">
+                {t("relationExpressionDescription", {
+                  source: sourceEntityPlaceholder,
+                  target: targetEntityPlaceholder,
+                })}
+              </p>
+              {relationDraft.name.trim() ? (
+                <div className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+                  <span className="text-zinc-400">{t("relationExpressionPreview")}: </span>
+                  {formatEntityRelation(
+                    relationDraft.name,
+                    entityById.get(relationDraft.sourceEntityId)?.name ?? t("missingEntity"),
+                    entityById.get(relationDraft.targetEntityId)?.name ?? t("missingEntity"),
+                  )}
+                </div>
+              ) : null}
             </div>
             <div>
               <Label>{t("relationDescription")}</Label>
@@ -652,11 +687,15 @@ export function EntityWorkspace({
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button type="button" variant="secondary" onClick={() => setRelationOpen(false)}>
               {common("cancel")}
             </Button>
-            <Button type="submit" loading={saveRelation.isPending}>
+            <Button
+              type="submit"
+              loading={saveRelation.isPending}
+              disabled={!relationDraft.name.trim()}
+            >
               {common("save")}
             </Button>
           </div>

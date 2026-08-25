@@ -10,6 +10,7 @@ import {
   mapProject,
 } from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
+import { formatEntityRelation } from "@/lib/entity-relation";
 import { generateModelText } from "@/lib/model-generation";
 import {
   type AppSettings,
@@ -418,6 +419,7 @@ async function buildChatContext(
     contextEntityIds.add(relation.targetEntityId);
   });
   const contextEntities = await loadEntities(chat.projectId, [...contextEntityIds]);
+  const entityNames = new Map(contextEntities.map((entity) => [entity.id, entity.name]));
   const chapters = (
     await Promise.all(
       chapterRows.map(async (row) => {
@@ -446,7 +448,7 @@ ${contextSettings.includeStorySynopsis ? `  <story_synopsis>${escapeXml(project.
 ${contextEntities.map((entity) => `    <entity id="${escapeXml(entity.id)}" type="${escapeXml(entity.type.systemKey ?? entity.type.name)}" name="${escapeXml(entity.name)}">${escapeXml(entity.description)}</entity>`).join("\n")}
   </entities>
   <entity_relations>
-${relations.map((relation) => `    <relation source_entity_id="${escapeXml(relation.sourceEntityId)}" target_entity_id="${escapeXml(relation.targetEntityId)}" name="${escapeXml(relation.name)}">${escapeXml(relation.description)}</relation>`).join("\n")}
+${relations.map((relation) => `    <relation source_entity_id="${escapeXml(relation.sourceEntityId)}" target_entity_id="${escapeXml(relation.targetEntityId)}" expression="${escapeXml(relation.name)}"><statement>${escapeXml(formatEntityRelation(relation.name, entityNames.get(relation.sourceEntityId) ?? relation.sourceEntityId, entityNames.get(relation.targetEntityId) ?? relation.targetEntityId))}</statement><description>${escapeXml(relation.description)}</description></relation>`).join("\n")}
   </entity_relations>
   <chapters>
 ${chapters.join("\n")}

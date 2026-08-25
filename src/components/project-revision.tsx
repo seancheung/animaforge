@@ -739,14 +739,16 @@ export function ProjectRevisionWorkspace({
         open={createOpen}
         onOpenChange={(open) => !createRevision.isPending && setCreateOpen(open)}
         title={t("createTitle")}
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             createRevision.mutate();
           }}
         >
-          <div className="space-y-4 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
               <Label>{t("sourceType")}</Label>
               <Select
@@ -875,7 +877,7 @@ export function ProjectRevisionWorkspace({
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
               {common("cancel")}
             </Button>

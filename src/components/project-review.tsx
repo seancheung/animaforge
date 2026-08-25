@@ -329,8 +329,9 @@ export function ProjectReviewWorkspace({
         onOpenChange={(open) => !generatingId && setCreateOpen(open)}
         title={t("createTitle")}
         width="max-w-lg"
+        scrollable={false}
       >
-        <div className="scrollbar-thin max-h-[70vh] space-y-5 overflow-y-auto p-5">
+        <div className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
           <div>
             <Label>{t("reviewer")}</Label>
             <Select value={reviewerId} onChange={setReviewerId} options={reviewerOptions} />
@@ -347,7 +348,7 @@ export function ProjectReviewWorkspace({
             <Select value={chapterId} onChange={setChapterId} options={chapterOptions} />
           </div>
         </div>
-        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+        <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
           <Button variant="secondary" onClick={() => setCreateOpen(false)}>
             {common("cancel")}
           </Button>

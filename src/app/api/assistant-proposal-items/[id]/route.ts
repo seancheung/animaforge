@@ -197,7 +197,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         if (
           typeof payload.sourceEntityId !== "string" ||
           typeof payload.targetEntityId !== "string" ||
-          typeof payload.name !== "string"
+          typeof payload.name !== "string" ||
+          !payload.name.trim()
         )
           throw new ApiError("invalidEntityRelation");
         if (payload.sourceEntityId === payload.targetEntityId)

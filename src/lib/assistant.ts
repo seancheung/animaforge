@@ -8,6 +8,7 @@ import {
 } from "@/lib/assistant-tools";
 import { loadServices, loadSettings, loadStyleFingerprint, mapProject } from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
+import { formatEntityRelation } from "@/lib/entity-relation";
 import { mergeStyleInstructions } from "@/lib/style-fingerprint";
 import { openAiStreamOptions, TokenUsageTracker } from "@/lib/token-usage";
 import type {
@@ -459,8 +460,8 @@ You must return exactly one valid JSON object and no Markdown fences, with this 
         { "action": "update_project_field", "label": "Prose style", "payload": { "field": "prose_style", "value": "..." } },
         { "action": "create_entity", "label": "Entity name", "payload": { "type_id": "an available type ID", "name": "...", "description": "...", "always_include": false, "chapter_ids": ["optional chapter IDs to associate immediately"] } },
         { "action": "update_entity", "label": "Entity name", "payload": { "entity_id": "an existing ID", "type_id": "optional", "name": "optional", "description": "optional", "always_include": false } },
-        { "action": "create_relation", "label": "Relation name", "payload": { "source_entity_id": "an existing ID", "target_entity_id": "an existing ID", "name": "...", "description": "...", "always_include": false } },
-        { "action": "update_relation", "label": "Relation name", "payload": { "relation_id": "an existing ID", "source_entity_id": "optional", "target_entity_id": "optional", "name": "optional", "description": "optional", "always_include": false } },
+        { "action": "create_relation", "label": "Relationship expression", "payload": { "source_entity_id": "an existing ID", "target_entity_id": "an existing ID", "name": "a relationship expression; optionally use {source} and {target}", "description": "...", "always_include": false } },
+        { "action": "update_relation", "label": "Relationship expression", "payload": { "relation_id": "an existing ID", "source_entity_id": "optional", "target_entity_id": "optional", "name": "optional relationship expression; optionally use {source} and {target}", "description": "optional", "always_include": false } },
         { "action": "create_chapter", "label": "Chapter title", "payload": { "title": "...", "synopsis": "...", "entity_ids": ["optional existing entity IDs"] } },
         { "action": "update_chapter_title", "label": "Chapter title", "payload": { "chapter_id": "an existing ID", "title": "..." } },
         { "action": "update_chapter_synopsis", "label": "Chapter synopsis", "payload": { "chapter_id": "an existing ID", "synopsis": "..." } },
@@ -477,6 +478,7 @@ Group actionable changes from the same user request into one proposal whenever t
 In the project workspace, a request for a complete setup may return one combined proposal containing update_project_field items, create_entity items for characters and world information, create_relation items, and create_chapter items for the outline. Generate actionable items together instead of only describing what could be created.
 Prior proposals include proposal_id, item_id, decision, and revision links. When the user asks to revise an earlier proposal, return a new proposal instead of repeating or editing the old one. Add "supersedes_proposal_id" to the new proposal and "supersedes_item_id" to each replacement item, using only IDs supplied in prior_proposals. A pending replaced item becomes superseded automatically. A rejected item may be linked as the source of a revision but remains rejected. Never supersede or repeat an accepted item; it is already application data, so any requested follow-up must be expressed as a new update action against the applied entity. Omit revision IDs for unrelated proposals.
 Never invent type, entity, or relation IDs. Use IDs from the supplied project context or read-only tools.
+Relationship names are user-defined expressions. The literal placeholders {source} and {target} are optional; when present, they are replaced with the corresponding entity names before the relationship is injected into context. Preserve whichever natural-language form best expresses the relationship.
 For a project outline, create one create_chapter item per chapter. Include relevant existing entity IDs in entity_ids when the entity index provides clear matches. Never invent IDs or reference entities that are only being proposed in the same response because they do not have IDs yet. Apart from entity associations, chapters contain only a title and synopsis.
 In the chapter workspace, "create an outline" means creating multiple empty Text blocks with a synopsis for each segment. Return one create_text_block item per segment in narrative order. Never put prose content in a create_text_block proposal.
 When asked to extract entities from chapter prose, read the chapter content, compare candidates against the entity index and search existing entities before creating duplicates. Use update_chapter_entities for existing entities. For each genuinely missing entity, use create_entity with chapter_ids containing the chapter ID so accepting it creates the association immediately. Prefer operation "add" so existing chapter associations are preserved unless the user explicitly asks to replace or remove them.
@@ -571,6 +573,7 @@ async function buildAssistantInput(
   );
   const outputLanguage = project.language || (await loadSettings()).language;
   const styleFingerprint = await loadStyleFingerprint(project.styleFingerprintId);
+  const entityNames = new Map(entities.map((row) => [String(row.id), String(row.name)]));
 
   return {
     references: explicitReferences.map((reference) => ({
@@ -593,7 +596,7 @@ ${entityTypes.map((row) => `  <entity_type id="${escapeXml(row.id)}" system_key=
 ${entities.map((row) => `  <entity id="${escapeXml(row.id)}" type_id="${escapeXml(row.type_id)}" type="${escapeXml(row.type_system_key ?? row.type_name)}"><name>${escapeXml(row.name)}</name></entity>`).join("\n")}
 </entity_index>
 <relation_index>
-${relations.map((row) => `  <relation id="${escapeXml(row.id)}" source_entity_id="${escapeXml(row.source_entity_id)}" target_entity_id="${escapeXml(row.target_entity_id)}"><name>${escapeXml(row.name)}</name></relation>`).join("\n")}
+${relations.map((row) => `  <relation id="${escapeXml(row.id)}" source_entity_id="${escapeXml(row.source_entity_id)}" target_entity_id="${escapeXml(row.target_entity_id)}"><expression>${escapeXml(row.name)}</expression><statement>${escapeXml(formatEntityRelation(String(row.name), entityNames.get(String(row.source_entity_id)) ?? String(row.source_entity_id), entityNames.get(String(row.target_entity_id)) ?? String(row.target_entity_id)))}</statement></relation>`).join("\n")}
 </relation_index>
 <chapter_outline>
 ${chapters.map((row) => `  <chapter id="${escapeXml(row.id)}" sort="${Number(row.sort_order)}" entity_mode="${escapeXml(row.entity_mode)}" entity_ids="${escapeXml((entityIdsByChapter.get(String(row.id)) ?? []).join(","))}"><title>${escapeXml(row.title)}</title><synopsis>${escapeXml(row.synopsis)}</synopsis></chapter>`).join("\n")}

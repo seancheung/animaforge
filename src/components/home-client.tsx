@@ -322,14 +322,16 @@ export function HomeClient() {
         onOpenChange={setCreateOpen}
         title={t("createTitle")}
         description={t("createDescription")}
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             create.mutate();
           }}
         >
-          <div className="space-y-4 px-5 py-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div>
               <Label>{t("projectName")}</Label>
               <Input
@@ -366,7 +368,7 @@ export function HomeClient() {
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t px-5 py-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t px-5 py-3">
             <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
               {common("cancel")}
             </Button>
@@ -384,8 +386,10 @@ export function HomeClient() {
         title={t("cloneTitle")}
         description={t("cloneDescription")}
         width="max-w-2xl"
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             if (!cloneTarget || !cloneName.trim() || !hasProjectTransferSelection(cloneSelection))
@@ -393,7 +397,7 @@ export function HomeClient() {
             cloneProject.mutate({ project: cloneTarget, name: cloneName.trim() });
           }}
         >
-          <div className="space-y-5 p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
             <div>
               <Label>{t("projectName")}</Label>
               <Input
@@ -409,7 +413,7 @@ export function HomeClient() {
               disabled={cloneProject.isPending}
             />
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button
               type="button"
               variant="secondary"

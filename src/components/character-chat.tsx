@@ -871,14 +871,16 @@ export function CharacterChatWorkspace({
         title={t("createTitle")}
         description={t("createDescription")}
         width="max-w-2xl"
+        scrollable={false}
       >
         <form
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             createChat.mutate();
           }}
         >
-          <div className="scrollbar-thin max-h-[65vh] space-y-6 overflow-y-auto p-5">
+          <div className="scrollbar-thin min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
             <div>
               <Label>{t("members")}</Label>
               <MultiSelect
@@ -910,7 +912,7 @@ export function CharacterChatWorkspace({
               chapters={chapters}
             />
           </div>
-          <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
             <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
               {common("cancel")}
             </Button>
@@ -926,8 +928,9 @@ export function CharacterChatWorkspace({
         title={t("settingsTitle")}
         description={t("settingsDescription")}
         width="max-w-2xl"
+        scrollable={false}
       >
-        <div className="scrollbar-thin max-h-[65vh] space-y-6 overflow-y-auto p-5">
+        <div className="scrollbar-thin min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
           <div>
             <Label>{t("membersFixed")}</Label>
             <div className="flex flex-wrap gap-2">
@@ -956,7 +959,7 @@ export function CharacterChatWorkspace({
             chapters={chapters}
           />
         </div>
-        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+        <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t p-3">
           <Button variant="secondary" onClick={() => setSettingsOpen(false)}>
             {common("cancel")}
           </Button>
