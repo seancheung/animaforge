@@ -3,6 +3,10 @@
     "title": "AnimaForge — AI 文本编辑",
     "description": "用于文字编辑的 AI 辅助创作工作台"
   },
+  "NotFound": {
+    "title": "页面不存在",
+    "description": "你访问的页面可能已被移动、删除，或链接地址有误。"
+  },
   "Common": {
     "add": "添加",
     "cancel": "取消",
