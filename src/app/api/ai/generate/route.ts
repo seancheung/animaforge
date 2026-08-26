@@ -169,6 +169,8 @@ async function loadAdjacentChapters(
 export async function POST(request: Request) {
   try {
     const body = await jsonBody<GenerateBody>(request);
+    if (body.mode === "content" && body.contentAction === "modify" && !body.instructions?.trim())
+      throw new ApiError("modificationRequestRequired", 400);
     const detail = await chapterDetail(body.chapterId);
     const task: TaskType = body.mode === "content" ? "writing" : "summary";
     const configuredModel =

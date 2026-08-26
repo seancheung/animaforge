@@ -17,6 +17,7 @@ import {
   FilePenLine,
   FileText,
   Hash,
+  House,
   ListChecks,
   MessageCircle,
   NotebookTabs,
@@ -333,8 +334,15 @@ export function ProjectClient({
     );
   if (!detail.data)
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-50 text-sm text-zinc-500">
-        {t("loadFailed")}
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-zinc-50">
+        <p className="text-sm text-zinc-500">{t("loadFailed")}</p>
+        <Link
+          href="/"
+          className="focus-ring inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-3.5 font-medium text-sm text-white shadow-sm transition hover:bg-zinc-800"
+        >
+          <House className="size-4" />
+          {common("backHome")}
+        </Link>
       </div>
     );
 

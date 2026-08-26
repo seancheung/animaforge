@@ -76,9 +76,11 @@ import {
 import { cn } from "@/lib/utils";
 
 type GenerateMode = "content" | "checkpoint" | "blockSynopsis" | "chapterSynopsis";
+type ContentGenerationAction = "generate" | "modify";
 interface GenerateTarget {
   mode: GenerateMode;
   block?: Block;
+  contentAction?: ContentGenerationAction;
 }
 type EditorView = "edit" | "outline" | "read";
 type ContextSourceMode = "ignore" | "synopsis" | "content";
@@ -657,7 +659,11 @@ export function ChapterEditor({ chapterId }: { chapterId: string }) {
                         setGeneration({
                           mode: block.type === "checkpoint" ? "checkpoint" : "content",
                           block,
+                          ...(block.type === "text" ? { contentAction: "generate" } : {}),
                         })
+                      }
+                      onModify={() =>
+                        setGeneration({ mode: "content", block, contentAction: "modify" })
                       }
                       onStop={() => generationControllers.current.get(block.id)?.abort()}
                       onSynopsis={() => setSynopsisBlock(block)}
@@ -1126,6 +1132,7 @@ function BlockCard({
   onAddAfter,
   onMove,
   onGenerate,
+  onModify,
   onStop,
   onSynopsis,
   onClearStale,
@@ -1149,6 +1156,7 @@ function BlockCard({
   onAddAfter: (type: BlockType) => void;
   onMove: (direction: "up" | "down") => void;
   onGenerate: () => void;
+  onModify: () => void;
   onStop: () => void;
   onSynopsis: () => void;
   onClearStale: () => void;
@@ -1344,6 +1352,11 @@ function BlockCard({
                   )}
                 </ToolbarButton>
               )}
+              {!streaming && block.type === "text" && content ? (
+                <ToolbarButton label={t("modify")} onClick={onModify}>
+                  <Pencil className="size-3.5" />
+                </ToolbarButton>
+              ) : null}
               {block.type === "text" ? (
                 <ToolbarButton label={t("synopsis")} disabled={streaming} onClick={onSynopsis}>
                   <AlignLeft className="size-3.5" />
@@ -1622,7 +1635,11 @@ function GenerationDialog({
 
   const labels: Record<GenerateMode, string> = {
     content:
-      target?.block && getBlockContent(target.block) ? t("regenerateText") : t("generateText"),
+      target?.contentAction === "modify"
+        ? t("modifyText")
+        : target?.block && getBlockContent(target.block)
+          ? t("regenerateText")
+          : t("generateText"),
     checkpoint: t("generateCheckpoint"),
     blockSynopsis: t("generateBlockSynopsis"),
     chapterSynopsis: t("generateChapterSynopsis"),
@@ -1630,6 +1647,10 @@ function GenerationDialog({
   async function run() {
     if (!target || !modelId) {
       toast.error(t("selectModelFirst"));
+      return;
+    }
+    if (target.mode === "content" && target.contentAction === "modify" && !instructions.trim()) {
+      toast.error(t("revisionRequestRequired"));
       return;
     }
     const priorCheckpoint =
@@ -1661,6 +1682,7 @@ function GenerationDialog({
           chapterId: detail.chapter.id,
           blockId,
           mode: target.mode,
+          contentAction: target.contentAction,
           instructions,
           modelId,
           ...options,
@@ -1702,7 +1724,7 @@ function GenerationDialog({
   if (!target) return null;
   const isContent = target.mode === "content";
   const isCheckpoint = target.mode === "checkpoint";
-  const isRegeneration = Boolean(isContent && target.block && getBlockContent(target.block).trim());
+  const isModification = Boolean(isContent && target.contentAction === "modify");
   const priorCheckpoint =
     isCheckpoint && target.block
       ? [...detail.blocks]
@@ -1755,9 +1777,7 @@ function GenerationDialog({
     ...(isContent && options.nextChapter !== "ignore"
       ? [contextModeLabel("nextChapter", options.nextChapter)]
       : []),
-    ...(isContent && instructions.trim() && target.block && getBlockContent(target.block)
-      ? [t("oldText")]
-      : []),
+    ...(isModification && target.block && getBlockContent(target.block) ? [t("oldText")] : []),
   ];
   return (
     <Modal
@@ -1780,12 +1800,13 @@ function GenerationDialog({
           </div>
           {isContent ? (
             <div>
-              <Label>{t(isRegeneration ? "revisionRequest" : "generationRequest")}</Label>
+              <Label>{t(isModification ? "revisionRequest" : "generationRequest")}</Label>
               <Textarea
+                required={isModification}
                 value={instructions}
                 onChange={(event) => setInstructions(event.target.value)}
                 placeholder={t(
-                  isRegeneration ? "revisionRequestPlaceholder" : "generationRequestPlaceholder",
+                  isModification ? "revisionRequestPlaceholder" : "generationRequestPlaceholder",
                 )}
               />
             </div>
@@ -1934,9 +1955,12 @@ function GenerationDialog({
             {t("stopGeneration")}
           </Button>
         ) : (
-          <Button disabled={staleDependency} onClick={run}>
+          <Button
+            disabled={staleDependency || (isModification && !instructions.trim())}
+            onClick={run}
+          >
             <Sparkles className="size-3.5" />
-            {t("confirmGeneration")}
+            {t(isModification ? "confirmModification" : "confirmGeneration")}
           </Button>
         )}
       </div>

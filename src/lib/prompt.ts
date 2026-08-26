@@ -5,6 +5,7 @@ import { type Block, type Chapter, type ChapterDetail, getBlockContent } from "@
 
 export interface GenerationOptions {
   mode: "content" | "checkpoint" | "blockSynopsis" | "chapterSynopsis";
+  contentAction?: "generate" | "modify";
   instructions?: string;
   includeBlockSynopsis?: boolean;
   includeChapterSynopsis?: boolean;
@@ -224,7 +225,7 @@ export function buildPrompt(
       project.push(element("target_block_content", getBlockContent(block)));
     if (
       options.mode === "content" &&
-      options.instructions?.trim() &&
+      options.contentAction === "modify" &&
       getBlockContent(block).trim()
     ) {
       project.push(element("old_block_content", getBlockContent(block)));
@@ -241,15 +242,15 @@ export function buildPrompt(
 
   project.push("</chapter>", "</project>");
 
-  const oldBlockContent = block ? getBlockContent(block).trim() : "";
   const blockBoundaryInstruction =
     "Treat preceding_block_context as events and facts that have already happened; do not unnecessarily retell them. Treat following_block_context only as a future continuity boundary. Do not copy, paraphrase, foreshadow in detail, or enact events that belong to following_block_context. Write only target_block and end before the following blocks begin.";
   const tasks = {
-    content: options.instructions?.trim()
-      ? oldBlockContent
-        ? `Rewrite only target_block according to the revision request. ${blockBoundaryInstruction} Return only the revised fiction prose, with no explanation.\n<revision_request>${xml(options.instructions)}</revision_request>`
-        : `Write only target_block according to target_block_synopsis, the optional generation requirements, and the provided context. ${blockBoundaryInstruction} Return only the fiction prose, with no title, explanation, or XML tags.\n<generation_requirements>${xml(options.instructions)}</generation_requirements>`
-      : `Write or regenerate only target_block using target_block_synopsis and the provided context. ${blockBoundaryInstruction} Return only the fiction prose, with no title, explanation, or XML tags.`,
+    content:
+      options.contentAction === "modify"
+        ? `Rewrite only target_block according to the revision request. ${blockBoundaryInstruction} Return only the revised fiction prose, with no explanation.\n<revision_request>${xml(options.instructions ?? "")}</revision_request>`
+        : options.instructions?.trim()
+          ? `Write only target_block according to target_block_synopsis, the optional generation requirements, and the provided context. ${blockBoundaryInstruction} Return only the fiction prose, with no title, explanation, or XML tags.\n<generation_requirements>${xml(options.instructions)}</generation_requirements>`
+          : `Write or regenerate only target_block using target_block_synopsis and the provided context. ${blockBoundaryInstruction} Return only the fiction prose, with no title, explanation, or XML tags.`,
     checkpoint:
       "Create an updated checkpoint summary. When previous_checkpoint is present, preserve its established facts and merge them with content_since_checkpoint. Otherwise summarize content_to_summarize. Preserve key events, character states, unresolved threads, and narrative setups. Return only a concise standalone summary.",
     blockSynopsis: `Create a concise plot synopsis only for target_block that states what happens and its narrative purpose. ${blockBoundaryInstruction} Do not merge future events from following_block_context into this synopsis. Return only the synopsis.`,
