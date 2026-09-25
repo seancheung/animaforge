@@ -393,6 +393,7 @@ export interface CharacterChatContextSettings {
   chapterIds: string[];
   entityIds: string[];
   preferChapterSynopsis: boolean;
+  preferBlockSynopsis: boolean;
   allowCharacterMentions: boolean;
 }
 

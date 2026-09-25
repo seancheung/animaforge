@@ -81,6 +81,7 @@ const chatContextSchema = z.object({
   chapterIds: z.array(idSchema).max(10_000),
   entityIds: z.array(idSchema).max(20_000),
   preferChapterSynopsis: z.boolean(),
+  preferBlockSynopsis: z.boolean().default(false),
   allowCharacterMentions: z.boolean(),
 });
 
@@ -293,6 +294,7 @@ function exportedChatContext(value: unknown) {
     chapterIds: stringArray(context.chapterIds),
     entityIds: stringArray(context.entityIds),
     preferChapterSynopsis: context.preferChapterSynopsis !== false,
+    preferBlockSynopsis: context.preferBlockSynopsis === true,
     allowCharacterMentions: context.allowCharacterMentions === true,
   };
 }

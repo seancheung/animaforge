@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
+  Download,
   MessageCircle,
   MessageSquarePlus,
   Plus,
@@ -49,6 +50,7 @@ const emptyContext = (): CharacterChatContextSettings => ({
   chapterIds: [],
   entityIds: [],
   preferChapterSynopsis: true,
+  preferBlockSynopsis: false,
   allowCharacterMentions: false,
 });
 
@@ -427,6 +429,39 @@ export function CharacterChatWorkspace({
     setSettingsOpen(true);
   };
 
+  const exportSession = () => {
+    const chat = detail.data;
+    if (!chat || sendTurn.isPending) return;
+    const session = chat.sessions.find((item) => item.id === chat.activeSessionId);
+    if (!session) return;
+    if (!chat.messages.length) {
+      toast.info(t("exportSessionEmpty"));
+      return;
+    }
+    const names = new Map(chat.members.map((member) => [member.id, member.name]));
+    const content = chat.messages
+      .map((message) => {
+        const name =
+          message.role === "author"
+            ? (chat.userCharacter?.name ?? t("author"))
+            : (names.get(message.characterId ?? "") ?? message.characterId ?? "");
+        return `${name}: ${message.content}`;
+      })
+      .join("\n\n");
+    const filename =
+      `${chat.members.map((member) => member.name).join("、")}-${t("session", { number: session.sortOrder })}`
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+        .slice(0, 150);
+    const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filename}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   return (
     <div className="flex h-full min-h-0 bg-white">
       <aside className="flex w-72 shrink-0 flex-col border-zinc-200 border-r bg-zinc-50/70">
@@ -542,6 +577,17 @@ export function CharacterChatWorkspace({
                     onClick={() => createSession.mutate()}
                   >
                     <Plus className="size-4" />
+                  </Button>
+                </Tooltip>
+                <Tooltip label={t("exportSession")}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label={t("exportSession")}
+                    disabled={sendTurn.isPending || !detail.data.activeSessionId}
+                    onClick={exportSession}
+                  >
+                    <Download className="size-4" />
                   </Button>
                 </Tooltip>
                 <Tooltip label={t("deleteSession")}>
@@ -1216,6 +1262,14 @@ function ContextSettingsFields({
           onChange={(checked) => onChange({ ...value, preferChapterSynopsis: checked })}
           label={t("preferChapterSynopsis")}
           description={t("preferChapterSynopsisDescription")}
+        />
+      </div>
+      <div className="rounded-xl border border-zinc-200 p-4">
+        <Switch
+          checked={value.preferBlockSynopsis}
+          onChange={(checked) => onChange({ ...value, preferBlockSynopsis: checked })}
+          label={t("preferBlockSynopsis")}
+          description={t("preferBlockSynopsisDescription")}
         />
       </div>
       <div>

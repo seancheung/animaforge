@@ -58,6 +58,7 @@ export function normalizeChatContextSettings(
     chapterIds: uniqueStrings(input.chapterIds),
     entityIds: [...new Set([...memberIds, ...uniqueStrings(input.entityIds)])],
     preferChapterSynopsis: input.preferChapterSynopsis !== false,
+    preferBlockSynopsis: input.preferBlockSynopsis === true,
     allowCharacterMentions: input.allowCharacterMentions === true,
   };
 }
@@ -430,7 +431,15 @@ async function buildChatContext(
         const blocks = await loadBlocks(String(row.id));
         const prose = blocks
           .filter((block) => block.type === "text")
-          .map(getBlockContent)
+          .map((block) => {
+            const content = getBlockContent(block);
+            const synopsis = block.synopsis.trim();
+            return contextSettings.preferBlockSynopsis
+              ? synopsis || (content.trim() ? content : "")
+              : content.trim()
+                ? content
+                : synopsis;
+          })
           .filter(Boolean)
           .join("\n\n");
         if (prose)
