@@ -516,6 +516,9 @@ export function CharacterChatWorkspace({
                     locale,
                   )}
                 </span>
+                <span className="mt-1 block truncate text-xs text-zinc-500">
+                  {t("chatIdentity", { name: chat.userCharacter?.name ?? t("author") })}
+                </span>
                 <span className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
                   <span>{t("sessionCount", { count: chat.sessionCount })}</span>
                   <span>{formatDate(chat.updatedAt, locale)}</span>

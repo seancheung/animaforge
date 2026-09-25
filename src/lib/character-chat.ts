@@ -210,12 +210,6 @@ export async function createCharacterChat(
     .where({ "entities.project_id": projectId, "entity_types.system_key": "character" })
     .whereIn("entities.id", orderedMemberIds);
   if (characters.length !== orderedMemberIds.length) throw new ApiError("chatMemberInvalid");
-  const memberKey = [...orderedMemberIds].sort().join(":");
-  const existing = (await conn("character_chats")
-    .where({ project_id: projectId, member_key: memberKey })
-    .first()) as Row | undefined;
-  if (existing) return loadCharacterChat(String(existing.id));
-
   if (userCharacterId && orderedMemberIds.includes(userCharacterId))
     throw new ApiError("chatIdentityCannotBeMember");
   if (
@@ -230,6 +224,16 @@ export async function createCharacterChat(
       .first())
   )
     throw new ApiError("chatIdentityInvalid");
+
+  const memberKey = [...orderedMemberIds].sort().join(":");
+  const existing = (await conn("character_chats")
+    .where({
+      project_id: projectId,
+      member_key: memberKey,
+      user_entity_id: userCharacterId || null,
+    })
+    .first()) as Row | undefined;
+  if (existing) return loadCharacterChat(String(existing.id));
 
   const chatId = newId();
   const sessionId = newId();
