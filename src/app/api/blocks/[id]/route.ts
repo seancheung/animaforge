@@ -51,7 +51,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (body.stale !== undefined) update.stale = body.stale ? 1 : 0;
 
       if (body.content !== undefined) {
-        if (body.newSwipe) {
+        if (body.newSwipe || !blockRow.current_swipe_id) {
           const swipeId = newId();
           await trx("block_swipes").insert({ id: swipeId, block_id: id, content: body.content });
           update.current_swipe_id = swipeId;

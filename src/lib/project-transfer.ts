@@ -1069,7 +1069,10 @@ export async function importProjectTransfer(value: unknown) {
       for (const block of chapter.blocks) {
         const importedBlockId = newId();
         const swipeIds = new Map(block.swipes.map((swipe) => [swipe.id, newId()]));
-        const contentSwipeId = block.swipes.length === 0 && block.content !== null ? newId() : null;
+        const contentSwipeId =
+          block.swipes.length === 0 && (block.type === "text" || block.content !== null)
+            ? newId()
+            : null;
         blockIds.set(block.id, importedBlockId);
         for (const [sourceId, importedId] of swipeIds) importedSwipeIds.set(sourceId, importedId);
         blockRows.push({
@@ -1096,7 +1099,7 @@ export async function importProjectTransfer(value: unknown) {
           swipeRows.push({
             id: contentSwipeId,
             block_id: importedBlockId,
-            content: block.content,
+            content: block.content ?? "",
             created_at: new Date(Date.now() + swipeOrder).toISOString(),
           });
           swipeOrder += 1;
