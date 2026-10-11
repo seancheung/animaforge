@@ -21,7 +21,7 @@ function load(name, deps = {}, extra = "") {
   return scope.exports;
 }
 
-async function fixture(t, contextK = 1000, source = "文".repeat(165004)) {
+async function fixture(t, contextK = 1000, source = "文".repeat(165004), generate) {
   const db = knex({
     client: "better-sqlite3",
     connection: { filename: ":memory:" },
@@ -63,6 +63,7 @@ async function fixture(t, contextK = 1000, source = "文".repeat(165004)) {
       table.text(key);
     for (const key of ["level", "node_index", "node_count"]) table.integer(key);
   });
+  await require("../../migrations/202610120001_blueprint_preview.cjs").up(db);
   await db("translation_projects").insert({ id: "p", source_content: source });
   await db("translation_blueprints").insert({
     id: "b",
@@ -93,6 +94,8 @@ async function fixture(t, contextK = 1000, source = "文".repeat(165004)) {
       "@/lib/model-generation": {
         generateModelText: async (request) => {
           requests.push(request);
+          if (generate) return generate(request, db);
+          await request.onDelta?.("Concise blueprint");
           return "Concise blueprint";
         },
       },
@@ -132,17 +135,15 @@ test("resumed legacy task reuses complete analysis and skips pending reductions"
       input_content: "source",
       output_content: "文".repeat(6000),
     });
-  await f
-    .db("translation_blueprint_nodes")
-    .insert({
-      id: "pending",
-      blueprint_id: "b",
-      level: 1,
-      node_index: 0,
-      node_count: 1,
-      status: "pending",
-      input_content: "unused",
-    });
+  await f.db("translation_blueprint_nodes").insert({
+    id: "pending",
+    blueprint_id: "b",
+    level: 1,
+    node_index: 0,
+    node_count: 1,
+    status: "pending",
+    input_content: "unused",
+  });
   assert.equal(await f.run(), "complete");
   assert.equal(f.requests.length, 1);
   assert.match(f.requests[0].prompt, /<consolidated_analyses>/);
@@ -167,19 +168,53 @@ test("small context splits without losing source and reports stage progress", as
 
 test("nonshrinking reduction stops before another model call or layer", async (t) => {
   const f = await fixture(t, 32);
-  await f
-    .db("translation_blueprint_nodes")
-    .insert({
-      id: "n",
-      blueprint_id: "b",
-      level: 1,
-      node_index: 0,
-      node_count: 1,
-      status: "completed",
-      input_content: "文".repeat(20000),
-      output_content: "文".repeat(30000),
-    });
+  await f.db("translation_blueprint_nodes").insert({
+    id: "n",
+    blueprint_id: "b",
+    level: 1,
+    node_index: 0,
+    node_count: 1,
+    status: "completed",
+    input_content: "文".repeat(20000),
+    output_content: "文".repeat(30000),
+  });
   await assert.rejects(f.run(), /translationBlueprintReductionStalled/);
   assert.equal(f.requests.length, 0);
   assert.equal((await f.db("translation_blueprint_nodes")).length, 1);
+});
+
+test("streaming preview is separate from final content and cleared on success", async (t) => {
+  const f = await fixture(t, 1000, "source", async (request, db) => {
+    await request.onDelta("First");
+    const row = await db("translation_blueprints").first();
+    assert.equal(row.partial_content, "First");
+    assert.equal(row.content, null);
+    assert.equal(row.status, "generating");
+    await request.onDelta(" second");
+    return "First second";
+  });
+  assert.equal(await f.run(), "complete");
+  const row = await f.db("translation_blueprints").first();
+  assert.equal(row.content, "First second");
+  assert.equal(row.partial_content, "");
+  assert.equal(row.status, "ready");
+});
+
+test("interrupted streams flush the last draft and restart without duplicate text", async (t) => {
+  let attempt = 0;
+  const f = await fixture(t, 1000, "source", async (request) => {
+    if (attempt++ === 0) {
+      await request.onDelta("First");
+      await request.onDelta(" tail");
+      throw new Error("interrupted");
+    }
+    await request.onDelta("Replacement");
+    return "Replacement";
+  });
+  await assert.rejects(f.run(), /interrupted/);
+  const row = await f.db("translation_blueprints").first();
+  assert.equal(row.partial_content, "First tail");
+  assert.equal(row.content, null);
+  assert.equal(await f.run(), "complete");
+  assert.equal((await f.db("translation_blueprints").first()).content, "Replacement");
 });

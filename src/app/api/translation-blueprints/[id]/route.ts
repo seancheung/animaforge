@@ -1,6 +1,7 @@
 import { fail, jsonBody, ok } from "@/lib/api";
 import {
   deleteTranslationBlueprint,
+  loadBlueprintPreview,
   loadTranslationBlueprint,
   updateTranslationBlueprint,
 } from "@/lib/translation";
@@ -14,6 +15,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    if (new URL(_request.url).searchParams.get("preview") === "1") {
+      return ok(await loadBlueprintPreview(id));
+    }
     return ok(await loadTranslationBlueprint(id));
   } catch (error) {
     return fail(error);

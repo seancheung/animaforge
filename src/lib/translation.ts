@@ -18,6 +18,29 @@ import type {
 
 type Row = Record<string, unknown>;
 
+export async function loadBlueprintPreview(blueprintId: string) {
+  const conn = await getDb();
+  const blueprint = await conn("translation_blueprints")
+    .where({ id: blueprintId })
+    .select("partial_content")
+    .first();
+  if (!blueprint) throw new ApiError("translationBlueprintNotFound", 404);
+  const nodes = await conn("translation_blueprint_nodes")
+    .where({ blueprint_id: blueprintId, status: "completed" })
+    .select("id", "level", "node_index", "node_count", "output_content")
+    .orderBy(["level", "node_index"]);
+  return {
+    partialContent: String(blueprint.partial_content ?? ""),
+    notes: nodes.map((node) => ({
+      id: String(node.id),
+      level: Number(node.level),
+      index: Number(node.node_index) + 1,
+      total: Number(node.node_count),
+      content: String(node.output_content ?? ""),
+    })),
+  };
+}
+
 export const TRANSLATION_STAGES: TranslationStage[] = ["draft", "proofread", "fidelity", "polish"];
 
 const blueprintStatuses = new Set<TranslationBlueprintStatus>([

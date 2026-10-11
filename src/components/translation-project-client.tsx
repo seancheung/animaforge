@@ -284,7 +284,9 @@ export function TranslationProjectClient({ projectId }: { projectId: string }) {
   const editable = Boolean(
     active &&
       !active.lockedAt &&
-      (!active.job || active.job.status === "completed" || active.job.status === "cancelled"),
+      (!active.job ||
+        active.job.status === "completed" ||
+        (active.job.status === "cancelled" && Boolean(active.content.trim()))),
   );
   const stageView = stages.includes(view as TranslationStage) ? (view as TranslationStage) : null;
   const taskActions = active ? (
@@ -1072,8 +1074,8 @@ function BlueprintWorkspace({
         actions={actions}
       />
       <section className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-        {blueprint.status === "queued" || blueprint.status === "generating" ? (
-          <Empty title={t("generatingBlueprint")} description={t("backgroundHint")} />
+        {!blueprint.content.trim() ? (
+          <BlueprintGenerationPreview blueprint={blueprint} t={t} />
         ) : (
           <div className="mx-auto max-w-5xl p-7">
             <div className="mb-5 flex items-center justify-between gap-4">
@@ -1118,9 +1120,81 @@ function BlueprintWorkspace({
                 <MarkdownContent content={content} />
               </div>
             )}
+            <BlueprintGenerationPreview blueprint={blueprint} t={t} notesOnly />
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function BlueprintGenerationPreview({
+  blueprint,
+  t,
+  notesOnly = false,
+}: {
+  blueprint: TranslationBlueprint;
+  t: ReturnType<typeof useTranslations<"Translation">>;
+  notesOnly?: boolean;
+}) {
+  const active = blueprint.job?.status === "queued" || blueprint.job?.status === "running";
+  const preview = useQuery({
+    queryKey: ["blueprint-preview", blueprint.id, blueprint.job?.status],
+    queryFn: () =>
+      api<{
+        partialContent: string;
+        notes: Array<{ id: string; level: number; index: number; total: number; content: string }>;
+      }>(`/api/translation-blueprints/${blueprint.id}?preview=1`),
+    refetchInterval: active ? 1500 : false,
+  });
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-7">
+      {!notesOnly ? (
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="font-medium text-sm">{t("blueprintPreviewTitle")}</p>
+          <p className="mt-1 text-xs text-zinc-500">{t("blueprintPreviewHint")}</p>
+          {blueprint.job ? (
+            <p className="mt-2 text-xs text-zinc-500">{t(`job.${blueprint.job.status}`)}</p>
+          ) : null}
+        </div>
+      ) : null}
+      {preview.isError ? (
+        <div className="text-red-600 text-sm">
+          <p>{t("blueprintPreviewError")}</p>
+          <Button size="sm" variant="secondary" onClick={() => void preview.refetch()}>
+            {t("blueprintPreviewRetry")}
+          </Button>
+        </div>
+      ) : null}
+      {!notesOnly &&
+        (preview.data?.partialContent ? (
+          <div className="rounded-xl border border-zinc-100 bg-white px-8 py-7">
+            <MarkdownContent content={preview.data.partialContent} />
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-500">{t("blueprintPreviewWaiting")}</p>
+        ))}
+      {preview.data?.notes.length ? (
+        <section className="space-y-3">
+          <h2 className="font-medium text-sm">{t("blueprintAnalysisRecords")}</h2>
+          {preview.data.notes.map((note) => (
+            <details key={note.id} className="rounded-xl border border-zinc-200 p-4">
+              <summary className="cursor-pointer text-sm">
+                {note.level === 0
+                  ? t("blueprintAnalysisRecord", { index: note.index, total: note.total })
+                  : t("blueprintReductionRecord", {
+                      level: note.level,
+                      index: note.index,
+                      total: note.total,
+                    })}
+              </summary>
+              <div className="mt-4">
+                <MarkdownContent content={note.content} />
+              </div>
+            </details>
+          ))}
+        </section>
+      ) : null}
     </div>
   );
 }

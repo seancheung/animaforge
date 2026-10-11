@@ -160,25 +160,47 @@ async function processBlueprintQuantum(job: Row, signal: AbortSignal): Promise<Q
         message: fromSource ? "Blueprint:source" : "Blueprint:final",
         updated_at: conn.fn.now(),
       });
+    await conn("translation_blueprints")
+      .where({ id: blueprint.id })
+      .update({ partial_content: "" });
+    let partial = "";
+    let lastWrite = 0;
+    const flushPreview = async () => {
+      await conn("translation_blueprints").where({ id: blueprint.id }).update({
+        partial_content: partial,
+        updated_at: conn.fn.now(),
+      });
+      lastWrite = Date.now();
+    };
     const tag = fromSource ? "source_document" : "consolidated_analyses";
-    const content = await generateModelText({
-      service,
-      model,
-      feature: "translationBlueprint",
-      system:
-        finalBlueprintSystem(sourceLanguage, targetLanguage) +
-        (fromSource
-          ? " Analyze the entire supplied source document directly; produce the blueprint, not a translation."
-          : ""),
-      prompt: `<user_requirements>${escapeXml(requirements)}</user_requirements>\n<${tag}>\n${escapeXml(text)}\n</${tag}>`,
-      maxTokens: outputBudget,
-      signal,
-      project: { kind: "translation", id: String(blueprint.project_id) },
-    });
+    let content: string;
+    try {
+      content = await generateModelText({
+        service,
+        model,
+        feature: "translationBlueprint",
+        system:
+          finalBlueprintSystem(sourceLanguage, targetLanguage) +
+          (fromSource
+            ? " Analyze the entire supplied source document directly; produce the blueprint, not a translation."
+            : ""),
+        prompt: `<user_requirements>${escapeXml(requirements)}</user_requirements>\n<${tag}>\n${escapeXml(text)}\n</${tag}>`,
+        maxTokens: outputBudget,
+        onDelta: async (text) => {
+          partial += text;
+          if (Date.now() - lastWrite >= 750) await flushPreview();
+        },
+        signal,
+        project: { kind: "translation", id: String(blueprint.project_id) },
+      });
+    } finally {
+      await flushPreview();
+    }
     if (!content.trim()) throw new ApiError("modelEmptyContent");
     await conn.transaction(async (trx) => {
       await trx("translation_blueprints").where({ id: blueprint.id }).update({
         content,
+        partial_content: "",
         status: "ready",
         updated_at: trx.fn.now(),
       });
