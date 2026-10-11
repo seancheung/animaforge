@@ -23,6 +23,7 @@ export function calculateSourceWindowTokens(input: {
   inputExpansion?: number;
   outputExpansion: number;
   replyTokenLimit?: number | null;
+  outputTokenReserve?: number;
   customTokenLimit?: number | null;
   autoQualityLimit?: number;
 }) {
@@ -33,11 +34,17 @@ export function calculateSourceWindowTokens(input: {
     safetyMargin -
     estimateTextTokens(input.fixedContent) -
     input.fixedPromptOverhead;
+  const outputReserve = input.outputTokenReserve ?? 256;
   let safeLimit = Math.floor(available / ((input.inputExpansion ?? 1) + input.outputExpansion));
+  if (input.outputTokenReserve !== undefined) {
+    safeLimit = Math.floor(
+      (available - outputReserve) / ((input.inputExpansion ?? 1) + input.outputExpansion),
+    );
+  }
   if (input.replyTokenLimit && input.replyTokenLimit > 0) {
     safeLimit = Math.min(
       safeLimit,
-      Math.floor((input.replyTokenLimit - 256) / input.outputExpansion),
+      Math.floor((input.replyTokenLimit - outputReserve) / input.outputExpansion),
     );
   }
   if (safeLimit < MIN_SOURCE_WINDOW) return null;

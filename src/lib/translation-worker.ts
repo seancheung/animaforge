@@ -7,12 +7,9 @@ import { blueprintInputBudget, blueprintReductionError } from "@/lib/blueprint-r
 import { loadServices, loadSettings } from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
 import { generateModelText } from "@/lib/model-generation";
-import {
-  estimateTextTokens,
-  splitTextWindowsByTokens,
-  suggestedOutputTokens,
-} from "@/lib/token-windows";
+import { estimateTextTokens, splitTextWindowsByTokens } from "@/lib/token-windows";
 import { normalizeStageConfig } from "@/lib/translation";
+import { TRANSLATION_OUTPUT_EXPANSION, translationOutputBudget } from "@/lib/translation-budget";
 import type { LlmModel, LlmService, TranslationStage, TranslationStageConfig } from "@/lib/types";
 
 type Row = Record<string, unknown>;
@@ -398,19 +395,35 @@ async function processTranslationQuantum(job: Row, signal: AbortSignal): Promise
     });
   let partial = "";
   let lastPersisted = 0;
+  const outputBudget = translationOutputBudget(settings.replyCaps[task], model.customBody || "{}");
+  const system = stageSystem(
+    selectedStage.stage,
+    String(blueprint.source_language ?? ""),
+    String(blueprint.target_language),
+  );
+  const contextTokens = model.contextWindowK * 1_000;
+  const availableOutput = Math.floor(
+    contextTokens -
+      Math.max(2_048, contextTokens * 0.1) -
+      estimateTextTokens(system + prompt) -
+      1_024,
+  );
+  const maxTokens = Math.min(
+    availableOutput,
+    outputBudget.cap ??
+      Math.ceil(
+        estimateTextTokens(String(sourceWindow.source_content)) * TRANSLATION_OUTPUT_EXPANSION,
+      ) + outputBudget.reserve,
+  );
+  if (maxTokens <= outputBudget.reserve) throw new ApiError("translationContextWindowTooSmall");
   const raw = await generateModelText({
     service,
     model,
     feature: task,
     project: { kind: "translation", id: String(blueprint.project_id) },
-    system: stageSystem(
-      selectedStage.stage,
-      String(blueprint.source_language ?? ""),
-      String(blueprint.target_language),
-    ),
+    system,
     prompt,
-    maxTokens:
-      settings.replyCaps[task] ?? suggestedOutputTokens(String(sourceWindow.source_content)),
+    maxTokens,
     preserveWhitespace: true,
     signal,
     onDelta: async (text) => {
@@ -510,7 +523,7 @@ async function handleQuantumFailure(job: Row, error: unknown, aborted: boolean) 
   await resetInterruptedUnit(job);
   const retryCount = Number(job.retry_count ?? 0) + 1;
   const message = error instanceof Error ? error.message : String(error);
-  if (retryCount <= 3) {
+  if (retryCount <= 3 && message !== "modelOutputTokenLimit") {
     const available = conn.raw("datetime('now', ?)", [`+${2 ** retryCount} seconds`]);
     await conn("background_jobs")
       .where({ id: job.id })

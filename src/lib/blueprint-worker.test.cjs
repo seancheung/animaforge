@@ -82,6 +82,7 @@ async function fixture(t, contextK = 1000, source = "文".repeat(165004), genera
       "@/lib/blueprint-reduction": load("blueprint-reduction"),
       "@/lib/token-windows": load("token-windows"),
       "@/lib/translation": {},
+      "@/lib/translation-budget": load("translation-budget"),
       "@/lib/db": {
         getDb: async () => db,
         newId: randomUUID,

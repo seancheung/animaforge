@@ -4,6 +4,7 @@ import { abortBackgroundJob } from "@/lib/background-registry";
 import { loadServices, loadSettings } from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
 import { calculateSourceWindowTokens, splitTextWindowsByTokens } from "@/lib/token-windows";
+import { TRANSLATION_OUTPUT_EXPANSION, translationOutputBudget } from "@/lib/translation-budget";
 import type {
   BackgroundJobStatus,
   TranslationBlueprint,
@@ -499,7 +500,7 @@ export async function startTranslationExecution(blueprintId: string) {
     return {
       stage: stage.stage,
       contextWindowTokens: model.contextWindowK * 1_000,
-      replyTokenLimit: settings.replyCaps[task],
+      outputBudget: translationOutputBudget(settings.replyCaps[task], model.customBody || "{}"),
     };
   });
   let windowTokens: number | null = null;
@@ -509,8 +510,9 @@ export async function startTranslationExecution(blueprintId: string) {
       fixedContent: `${String(blueprint.content)}\n${String(blueprint.instructions ?? "")}`,
       fixedPromptOverhead: 4_500,
       inputExpansion: stage.stage === "draft" ? 1 : 2.5,
-      outputExpansion: 1.5,
-      replyTokenLimit: stage.replyTokenLimit,
+      outputExpansion: TRANSLATION_OUTPUT_EXPANSION,
+      replyTokenLimit: stage.outputBudget.cap,
+      outputTokenReserve: stage.outputBudget.reserve,
       customTokenLimit: settings.translationWindowTokenLimit,
     });
     if (stageWindowTokens == null) {

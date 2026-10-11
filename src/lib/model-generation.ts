@@ -67,7 +67,11 @@ export async function generateModelText({
           body: JSON.stringify({
             ...customBody,
             model: model.modelId,
-            ...(maxTokens ? { max_tokens: maxTokens } : {}),
+            ...(maxTokens
+              ? customBody.max_completion_tokens !== undefined
+                ? { max_completion_tokens: maxTokens, max_tokens: undefined }
+                : { max_tokens: maxTokens }
+              : {}),
             stream: true,
             stream_options: openAiStreamOptions(customBody),
             tools: undefined,

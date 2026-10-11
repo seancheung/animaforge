@@ -1081,7 +1081,7 @@
     "assistantConversationFailed": "The assistant conversation could not be created",
     "modelEmptyContent": "The model returned no content",
     "modelEmptyMessage": "The model returned no message",
-    "modelOutputTokenLimit": "The model reached its output token limit, so the result may contain only reasoning. Increase the reply length cap or reduce the model's reasoning effort",
+    "modelOutputTokenLimit": "The model reached this request’s output limit before completing the result. Increase the task reply limit or reduce reasoning effort before retrying, or create a new execution with smaller windows.",
     "modelNoData": "The model service returned no data",
     "modificationRequestRequired": "Modification requirements are required",
     "modelRequestFailed": "Model request failed ({status}): {message}",

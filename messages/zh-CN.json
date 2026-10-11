@@ -1081,7 +1081,7 @@
     "assistantConversationFailed": "无法创建助手会话",
     "modelEmptyContent": "模型没有返回内容",
     "modelEmptyMessage": "模型没有返回消息",
-    "modelOutputTokenLimit": "模型达到输出长度上限，结果可能只包含思考过程。请提高回复长度上限或降低模型的推理强度",
+    "modelOutputTokenLimit": "模型达到本次请求的输出长度上限，结果未完成。请提高对应任务的回复长度上限或降低推理强度后重试；也可减小窗口并重新创建执行任务。",
     "modelNoData": "模型服务未返回数据",
     "modificationRequestRequired": "修改要求不能为空",
     "modelRequestFailed": "模型请求失败（{status}）：{message}",

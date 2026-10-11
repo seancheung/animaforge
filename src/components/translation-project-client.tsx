@@ -1696,6 +1696,7 @@ function translateJobError(error: string, t: ReturnType<typeof useTranslations<"
   const safeKeys = new Set([
     "configuredModelMissing",
     "modelEmptyContent",
+    "modelOutputTokenLimit",
     "translationModelNotConfigured",
     "translationWindowMissing",
     "translationBlueprintReductionStalled",
