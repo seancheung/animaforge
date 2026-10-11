@@ -3,18 +3,21 @@ import {
   registerBackgroundController,
   unregisterBackgroundController,
 } from "@/lib/background-registry";
+import { blueprintInputBudget, blueprintReductionError } from "@/lib/blueprint-reduction";
 import { loadServices, loadSettings } from "@/lib/data";
 import { getDb, newId, parseJson } from "@/lib/db";
 import { generateModelText } from "@/lib/model-generation";
-import { suggestedOutputTokens } from "@/lib/token-windows";
-import { normalizeStageConfig, splitTranslationWindows } from "@/lib/translation";
+import {
+  estimateTextTokens,
+  splitTextWindowsByTokens,
+  suggestedOutputTokens,
+} from "@/lib/token-windows";
+import { normalizeStageConfig } from "@/lib/translation";
 import type { LlmModel, LlmService, TranslationStage, TranslationStageConfig } from "@/lib/types";
 
 type Row = Record<string, unknown>;
 type QuantumResult = "continue" | "complete";
 
-const BLUEPRINT_SOURCE_WINDOW = 12_000;
-const BLUEPRINT_REDUCTION_INPUT = 16_000;
 const SOURCE_TAIL = 1_200;
 const OUTPUT_TAIL = 1_500;
 const SOURCE_HEAD = 800;
@@ -87,9 +90,9 @@ function stageSystem(stage: TranslationStage, sourceLanguage: string, targetLang
   return `${shared} Polish the current draft into natural literary ${targetLanguage} while preserving every fact, ambiguity, paragraph boundary, voice distinction, terminology decision, and formatting token. Do not summarize, embellish, or restructure.`;
 }
 
-async function createBlueprintNodes(blueprintId: string, source: string) {
+async function createBlueprintNodes(blueprintId: string, source: string, tokenLimit: number) {
   const conn = await getDb();
-  const chunks = splitTranslationWindows(source, BLUEPRINT_SOURCE_WINDOW);
+  const chunks = splitTextWindowsByTokens(source, tokenLimit);
   await conn("translation_blueprint_nodes").insert(
     chunks.map((input, index) => ({
       id: newId(),
@@ -127,11 +130,84 @@ async function processBlueprintQuantum(job: Row, signal: AbortSignal): Promise<Q
     .where({ id: blueprint.id })
     .update({ status: "generating", updated_at: conn.fn.now() });
 
+  const requirements = String(blueprint.instructions ?? "");
+  const customBody = parseJson<Record<string, unknown>>(model.customBody || "{}", {});
+  const configuredOutput =
+    settings.replyCaps.translationBlueprint ??
+    Number(customBody.max_tokens ?? customBody.max_completion_tokens ?? 8_192);
+  const outputBudget =
+    Number.isFinite(configuredOutput) && configuredOutput > 0
+      ? Math.floor(configuredOutput)
+      : 8_192;
+  const inputBudget = blueprintInputBudget(
+    model.contextWindowK * 1_000,
+    outputBudget,
+    estimateTextTokens(escapeXml(requirements)),
+  );
+  if (inputBudget < 512) throw new ApiError("translationContextWindowTooSmall");
+  const fits = (text: string) => estimateTextTokens(escapeXml(text)) <= inputBudget;
+  const combine = (items: Row[]) =>
+    items
+      .map((node, index) => `\n\n--- Analysis ${index + 1} ---\n${String(node.output_content)}`)
+      .join("")
+      .trim();
+  const finish = async (text: string, fromSource: boolean): Promise<QuantumResult> => {
+    await conn("background_jobs")
+      .where({ id: job.id })
+      .update({
+        progress_current: 0,
+        progress_total: 1,
+        message: fromSource ? "Blueprint:source" : "Blueprint:final",
+        updated_at: conn.fn.now(),
+      });
+    const tag = fromSource ? "source_document" : "consolidated_analyses";
+    const content = await generateModelText({
+      service,
+      model,
+      feature: "translationBlueprint",
+      system:
+        finalBlueprintSystem(sourceLanguage, targetLanguage) +
+        (fromSource
+          ? " Analyze the entire supplied source document directly; produce the blueprint, not a translation."
+          : ""),
+      prompt: `<user_requirements>${escapeXml(requirements)}</user_requirements>\n<${tag}>\n${escapeXml(text)}\n</${tag}>`,
+      maxTokens: outputBudget,
+      signal,
+      project: { kind: "translation", id: String(blueprint.project_id) },
+    });
+    if (!content.trim()) throw new ApiError("modelEmptyContent");
+    await conn.transaction(async (trx) => {
+      await trx("translation_blueprints").where({ id: blueprint.id }).update({
+        content,
+        status: "ready",
+        updated_at: trx.fn.now(),
+      });
+      await trx("background_jobs").where({ id: job.id }).update({
+        progress_current: 1,
+        progress_total: 1,
+        message: "Blueprint ready",
+        updated_at: trx.fn.now(),
+      });
+    });
+    return "complete";
+  };
   let nodes = (await conn("translation_blueprint_nodes")
     .where({ blueprint_id: blueprint.id })
     .orderBy(["level", "node_index"])) as Row[];
+  // Reuse a complete layer even when an older worker has queued more reductions.
+  const levels = [...new Set(nodes.map((node) => Number(node.level)))].sort((a, b) => a - b);
+  for (const level of levels) {
+    const layer = nodes.filter((node) => Number(node.level) === level);
+    if (layer.every((node) => node.status === "completed")) {
+      const notes = combine(layer);
+      if (fits(notes)) return finish(notes, false);
+    }
+  }
   if (!nodes.length) {
-    await createBlueprintNodes(String(blueprint.id), String(project.source_content));
+    const source = String(project.source_content);
+    if (fits(source)) return finish(source, true);
+    // XML escaping can expand a source token by up to five times.
+    await createBlueprintNodes(String(blueprint.id), source, Math.floor(inputBudget / 5));
     nodes = (await conn("translation_blueprint_nodes")
       .where({ blueprint_id: blueprint.id })
       .orderBy(["level", "node_index"])) as Row[];
@@ -140,6 +216,18 @@ async function processBlueprintQuantum(job: Row, signal: AbortSignal): Promise<Q
   const levelNodes = nodes.filter((node) => Number(node.level) === highestLevel);
   const pending = levelNodes.find((node) => node.status !== "completed");
   if (pending) {
+    if (!fits(String(pending.input_content)))
+      throw new ApiError("translationContextWindowTooSmall");
+    const stageMessage =
+      highestLevel === 0 ? "Blueprint:analysis" : `Blueprint:reduction:${highestLevel}`;
+    await conn("background_jobs")
+      .where({ id: job.id })
+      .update({
+        progress_current: levelNodes.filter((node) => node.status === "completed").length,
+        progress_total: levelNodes.length,
+        message: stageMessage,
+        updated_at: conn.fn.now(),
+      });
     await conn("translation_blueprint_nodes")
       .where({ id: pending.id })
       .update({ status: "generating", output_content: "", updated_at: conn.fn.now() });
@@ -150,14 +238,14 @@ async function processBlueprintQuantum(job: Row, signal: AbortSignal): Promise<Q
     const prompt =
       highestLevel === 0
         ? `<user_requirements>${escapeXml(String(blueprint.instructions ?? ""))}</user_requirements>\n<source_segment index="${Number(pending.node_index) + 1}" total="${Number(pending.node_count)}">\n${escapeXml(String(pending.input_content))}\n</source_segment>`
-        : `<user_requirements>${escapeXml(String(blueprint.instructions ?? ""))}</user_requirements>\n<analysis_group index="${Number(pending.node_index) + 1}" total="${Number(pending.node_count)}">\n${escapeXml(String(pending.input_content))}\n</analysis_group>`;
+        : `Compress these notes to at most ${Math.max(1, Math.floor(String(pending.input_content).length / 2))} characters. Prioritize actionable terminology and voice decisions, merge repetitions, and omit commentary about the consolidation process.\n<user_requirements>${escapeXml(String(blueprint.instructions ?? ""))}</user_requirements>\n<analysis_group index="${Number(pending.node_index) + 1}" total="${Number(pending.node_count)}">\n${escapeXml(String(pending.input_content))}\n</analysis_group>`;
     const output = await generateModelText({
       service,
       model,
       feature: "translationBlueprint",
       system,
       prompt,
-      maxTokens: settings.replyCaps.translationBlueprint ?? undefined,
+      maxTokens: outputBudget,
       signal,
       project: { kind: "translation", id: String(blueprint.project_id) },
     });
@@ -165,31 +253,26 @@ async function processBlueprintQuantum(job: Row, signal: AbortSignal): Promise<Q
     await conn("translation_blueprint_nodes")
       .where({ id: pending.id })
       .update({ status: "completed", output_content: output, updated_at: conn.fn.now() });
-    const completed = (await conn("translation_blueprint_nodes")
-      .where({ blueprint_id: blueprint.id, status: "completed" })
-      .count({ count: "*" })
-      .first()) as { count?: number | string };
-    const total = (await conn("translation_blueprint_nodes")
-      .where({ blueprint_id: blueprint.id })
-      .count({ count: "*" })
-      .first()) as { count?: number | string };
     await conn("background_jobs")
       .where({ id: job.id })
       .update({
-        progress_current: Number(completed?.count ?? 0),
-        progress_total: Number(total?.count ?? 0) + 1,
-        message: `Analyzed blueprint segment ${Number(pending.node_index) + 1}/${Number(pending.node_count)}`,
+        progress_current: levelNodes.filter((node) => node.status === "completed").length + 1,
+        progress_total: levelNodes.length,
+        message: stageMessage,
         updated_at: conn.fn.now(),
       });
     return "continue";
   }
 
-  const combined = levelNodes
-    .map((node, index) => `\n\n--- Analysis ${index + 1} ---\n${String(node.output_content)}`)
-    .join("")
-    .trim();
-  if (combined.length > BLUEPRINT_REDUCTION_INPUT) {
-    const groups = splitTranslationWindows(combined, BLUEPRINT_REDUCTION_INPUT);
+  const combined = combine(levelNodes);
+  if (!fits(combined)) {
+    const reductionError = blueprintReductionError(
+      highestLevel,
+      levelNodes.reduce((total, node) => total + String(node.input_content).length, 0),
+      combined.length,
+    );
+    if (reductionError) throw new ApiError(reductionError);
+    const groups = splitTextWindowsByTokens(combined, Math.floor(inputBudget / 5));
     await conn("translation_blueprint_nodes").insert(
       groups.map((input, index) => ({
         id: newId(),
@@ -204,37 +287,15 @@ async function processBlueprintQuantum(job: Row, signal: AbortSignal): Promise<Q
     await conn("background_jobs")
       .where({ id: job.id })
       .update({
-        message: `Consolidating ${groups.length} analysis groups`,
+        progress_current: 0,
+        progress_total: groups.length,
+        message: `Blueprint:reduction:${highestLevel + 1}`,
         updated_at: conn.fn.now(),
       });
     return "continue";
   }
 
-  const prompt = `<user_requirements>${escapeXml(String(blueprint.instructions ?? ""))}</user_requirements>\n<consolidated_analyses>\n${escapeXml(combined)}\n</consolidated_analyses>`;
-  const content = await generateModelText({
-    service,
-    model,
-    feature: "translationBlueprint",
-    system: finalBlueprintSystem(sourceLanguage, targetLanguage),
-    prompt,
-    maxTokens: settings.replyCaps.translationBlueprint ?? undefined,
-    signal,
-    project: { kind: "translation", id: String(blueprint.project_id) },
-  });
-  if (!content.trim()) throw new ApiError("modelEmptyContent");
-  await conn.transaction(async (trx) => {
-    await trx("translation_blueprints")
-      .where({ id: blueprint.id })
-      .update({ content, status: "ready", updated_at: trx.fn.now() });
-    await trx("background_jobs")
-      .where({ id: job.id })
-      .update({
-        progress_current: Number(job.progress_total || 1),
-        message: "Blueprint ready",
-        updated_at: trx.fn.now(),
-      });
-  });
-  return "complete";
+  return finish(combined, false);
 }
 
 async function processTranslationQuantum(job: Row, signal: AbortSignal): Promise<QuantumResult> {

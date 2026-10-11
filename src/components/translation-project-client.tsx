@@ -760,12 +760,30 @@ function InsightsWorkspace({
   const taskStatus = blueprint.job
     ? t(`job.${blueprint.job.status}`)
     : t(`status.${blueprint.status}`);
-  const taskProgress = blueprint.job?.progressTotal
+  const numericTaskProgress = blueprint.job?.progressTotal
     ? t("taskProgressValue", {
         current: blueprint.job.progressCurrent,
         total: blueprint.job.progressTotal,
       })
     : t("noTaskProgress");
+  const blueprintMessage = blueprint.job?.message ?? "";
+  const taskProgress =
+    blueprint.job?.kind === "blueprint_generation"
+      ? blueprint.job.status === "completed"
+        ? t("blueprintProgressReady")
+        : blueprintMessage === "Blueprint:source"
+          ? t("blueprintProgressSource")
+          : blueprintMessage === "Blueprint:final"
+            ? t("blueprintProgressFinal")
+            : blueprintMessage === "Blueprint:analysis"
+              ? t("blueprintProgressAnalysis", { progress: numericTaskProgress })
+              : /^Blueprint:reduction:\d+$/.test(blueprintMessage)
+                ? t("blueprintProgressReduction", {
+                    level: Number(blueprintMessage.split(":")[2]),
+                    progress: numericTaskProgress,
+                  })
+                : t("generatingBlueprint")
+      : numericTaskProgress;
   const updatedAt = blueprint.job?.updatedAt ?? blueprint.updatedAt;
   const updatedLabel = Number.isNaN(new Date(updatedAt).getTime())
     ? "—"
@@ -1606,6 +1624,8 @@ function translateJobError(error: string, t: ReturnType<typeof useTranslations<"
     "modelEmptyContent",
     "translationModelNotConfigured",
     "translationWindowMissing",
+    "translationBlueprintReductionStalled",
+    "translationBlueprintReductionLimit",
     "translationContextWindowTooSmall",
   ]);
   return safeKeys.has(error) && t.has(error as never) ? t(error as never) : error;
