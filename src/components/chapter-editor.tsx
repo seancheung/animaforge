@@ -65,6 +65,7 @@ import {
   Tooltip,
 } from "@/components/ui";
 import { api } from "@/lib/client";
+import { cleanSynopsisOutput } from "@/lib/synopsis-output";
 import {
   type Block,
   type BlockType,
@@ -1604,6 +1605,8 @@ function GenerationDialog({
   const [modelId, setModelId] = useState<string>("");
   const [running, setRunning] = useState(false);
   const [preview, setPreview] = useState("");
+  const [resultReady, setResultReady] = useState(false);
+  const [saving, setSaving] = useState(false);
   const requestController = useRef<AbortController | null>(null);
   useEffect(() => () => requestController.current?.abort(), []);
   useEffect(() => {
@@ -1620,6 +1623,7 @@ function GenerationDialog({
     );
     setInstructions("");
     setPreview("");
+    setResultReady(false);
     setOptions(defaultContextOptions(target, detail.blocks));
   }, [
     target,
@@ -1663,6 +1667,7 @@ function GenerationDialog({
         : undefined;
     if (priorCheckpoint?.stale && !options.checkpointFullRebuild) return;
     setRunning(true);
+    setResultReady(false);
     setPreview("");
     const blockId = target.block?.id;
     const controller = new AbortController();
@@ -1703,9 +1708,16 @@ function GenerationDialog({
         if (target.mode === "content" || target.mode === "checkpoint") onLocalText(blockId!, text);
         else setPreview(text);
       }
+      if (target.mode === "blockSynopsis" || target.mode === "chapterSynopsis") {
+        text = cleanSynopsisOutput(text);
+        setPreview(text);
+      }
       if (!text.trim()) throw new Error(t("emptyModelResponse"));
-      await onComplete(target, text.trim(), Boolean(oldContent.trim()));
-      if (!streamsIntoBlock) onClose();
+      if (streamsIntoBlock) {
+        await onComplete(target, text.trim(), Boolean(oldContent.trim()));
+      } else {
+        setResultReady(true);
+      }
     } catch (error) {
       if ((target.mode === "content" || target.mode === "checkpoint") && blockId)
         onLocalText(blockId, oldContent);
@@ -1785,7 +1797,7 @@ function GenerationDialog({
   return (
     <Modal
       open={open}
-      onOpenChange={(value) => !value && !running && onClose()}
+      onOpenChange={(value) => !value && !running && !saving && onClose()}
       title={labels[target.mode]}
       width="max-w-4xl"
       scrollable={false}
@@ -1823,9 +1835,11 @@ function GenerationDialog({
           {preview || (running && target.mode !== "content" && target.mode !== "checkpoint") ? (
             <div>
               <Label>{t("streamPreview")}</Label>
-              <div className="max-h-44 min-h-24 overflow-y-auto rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700 leading-6">
+              <div className="max-h-44 min-h-24 overflow-y-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700 leading-6">
                 {preview}
-                <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-zinc-800" />
+                {running ? (
+                  <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-zinc-800" />
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -1940,7 +1954,7 @@ function GenerationDialog({
         </aside>
       </div>
       <div className="flex shrink-0 justify-end gap-2 border-zinc-100 border-t px-5 py-3">
-        <Button variant="secondary" disabled={running} onClick={onClose}>
+        <Button variant="secondary" disabled={running || saving} onClick={onClose}>
           {common("cancel")}
         </Button>
         {running ? (
@@ -1950,13 +1964,39 @@ function GenerationDialog({
           </Button>
         ) : (
           <Button
-            disabled={staleDependency || (isModification && !instructions.trim())}
+            disabled={saving || staleDependency || (isModification && !instructions.trim())}
             onClick={run}
           >
             <Sparkles className="size-3.5" />
-            {t(isModification ? "confirmModification" : "confirmGeneration")}
+            {t(
+              resultReady
+                ? "regenerate"
+                : isModification
+                  ? "confirmModification"
+                  : "confirmGeneration",
+            )}
           </Button>
         )}
+        {resultReady && !running ? (
+          <Button
+            loading={saving}
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await onComplete(target, preview.trim(), false);
+                onClose();
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : t("saveFailed"));
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <Check className="size-3.5" />
+            {t("applySynopsis")}
+          </Button>
+        ) : null}
       </div>
     </Modal>
   );

@@ -1252,6 +1252,7 @@
     "modifyText": "Modify Text block",
     "generateCheckpoint": "Generate Checkpoint",
     "generateBlockSynopsis": "Generate block synopsis",
+    "applySynopsis": "Use synopsis",
     "generateChapterSynopsis": "Generate chapter synopsis",
     "selectModelFirst": "Select a model first",
     "generationFailedStatus": "Generation failed ({status})",

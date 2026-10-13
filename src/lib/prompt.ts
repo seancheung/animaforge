@@ -254,9 +254,9 @@ export function buildPrompt(
     checkpoint:
       "Create an updated checkpoint summary. When previous_checkpoint is present, preserve its established facts and merge them with content_since_checkpoint. Otherwise summarize content_to_summarize. Preserve key events, character states, unresolved threads, and narrative setups. Return only a concise standalone summary.",
     blockSynopsis:
-      "Summarize target_block_content into a concise plot synopsis that states what happens and its narrative purpose. Use other context only to clarify references; do not invent events or include events from other blocks. Return only the synopsis.",
+      "Summarize target_block_content into a concise plot synopsis that states what happens and its narrative purpose. Use other context only to clarify references; do not invent events or include events from other blocks. Return only plain synopsis text, without XML/HTML tags (including block_synopsis), Markdown code fences, headings, or explanations.",
     chapterSynopsis:
-      "Create or revise the chapter synopsis, covering the main plot progression, turning points, and outcome. Return only the synopsis.",
+      "Create or revise the chapter synopsis, covering the main plot progression, turning points, and outcome. Return only plain synopsis text, without XML/HTML tags (including chapter_synopsis), Markdown code fences, headings, or explanations.",
   };
 
   const languageRequirement = outputLanguage

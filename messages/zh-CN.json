@@ -1252,6 +1252,7 @@
     "modifyText": "修改文本块",
     "generateCheckpoint": "生成检查点",
     "generateBlockSynopsis": "生成区块梗概",
+    "applySynopsis": "采用梗概",
     "generateChapterSynopsis": "生成章节梗概",
     "selectModelFirst": "请先选择模型",
     "generationFailedStatus": "生成失败（{status}）",
