@@ -219,7 +219,7 @@ export function buildPrompt(
       );
     }
     project.push(`<target_block id="${block.id}" sort="${block.sortOrder}" type="${block.type}">`);
-    if (options.includeBlockSynopsis !== false)
+    if (options.mode === "content" && options.includeBlockSynopsis !== false)
       project.push(element("target_block_synopsis", block.synopsis));
     if (options.mode === "blockSynopsis")
       project.push(element("target_block_content", getBlockContent(block)));
@@ -253,7 +253,8 @@ export function buildPrompt(
           : `Write or regenerate only target_block using target_block_synopsis and the provided context. ${blockBoundaryInstruction} Return only the fiction prose, with no title, explanation, or XML tags.`,
     checkpoint:
       "Create an updated checkpoint summary. When previous_checkpoint is present, preserve its established facts and merge them with content_since_checkpoint. Otherwise summarize content_to_summarize. Preserve key events, character states, unresolved threads, and narrative setups. Return only a concise standalone summary.",
-    blockSynopsis: `Create a concise plot synopsis only for target_block that states what happens and its narrative purpose. ${blockBoundaryInstruction} Do not merge future events from following_block_context into this synopsis. Return only the synopsis.`,
+    blockSynopsis:
+      "Summarize target_block_content into a concise plot synopsis that states what happens and its narrative purpose. Use other context only to clarify references; do not invent events or include events from other blocks. Return only the synopsis.",
     chapterSynopsis:
       "Create or revise the chapter synopsis, covering the main plot progression, turning points, and outcome. Return only the synopsis.",
   };

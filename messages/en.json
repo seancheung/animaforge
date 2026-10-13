@@ -1244,6 +1244,7 @@
     "peopleCount": "{count, plural, one {# person} other {# people}}",
     "entityCount": "{count, plural, one {# entity} other {# entities}}",
     "currentBlockSynopsis": "Current block synopsis",
+    "currentBlockContent": "Current block content",
     "surroundingBlocks": "Surrounding blocks",
     "blockCount": "{count, plural, one {# block} other {# blocks}}",
     "regenerateText": "Regenerate Text block",

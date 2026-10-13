@@ -1244,6 +1244,7 @@
     "peopleCount": "{count} 人",
     "entityCount": "{count} 个实体",
     "currentBlockSynopsis": "当前区块梗概",
+    "currentBlockContent": "当前区块正文",
     "surroundingBlocks": "前后区块",
     "blockCount": "{count} 块",
     "regenerateText": "重新生成文本块",

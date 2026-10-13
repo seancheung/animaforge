@@ -1764,7 +1764,10 @@ function GenerationDialog({
       ? [t("chapterSynopsis")]
       : []),
     ...checkpointContext,
-    ...(!isCheckpoint && options.includeBlockSynopsis && target.block?.synopsis
+    ...(target.mode === "blockSynopsis" && target.block && getBlockContent(target.block).trim()
+      ? [t("currentBlockContent")]
+      : []),
+    ...(isContent && options.includeBlockSynopsis && target.block?.synopsis
       ? [t("currentBlockSynopsis")]
       : []),
     ...(isContent && options.chapterBlocks !== "ignore"
@@ -1922,15 +1925,6 @@ function GenerationDialog({
                 }
                 label={t("currentChapterSynopsis")}
               />
-              {!isCheckpoint ? (
-                <Switch
-                  checked={options.includeBlockSynopsis}
-                  onChange={(value) =>
-                    updateOptions((current) => ({ ...current, includeBlockSynopsis: value }))
-                  }
-                  label={t("currentBlockSynopsis")}
-                />
-              ) : null}
               {isCheckpoint && priorCheckpoint ? (
                 <Switch
                   checked={options.checkpointFullRebuild}
