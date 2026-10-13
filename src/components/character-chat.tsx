@@ -5,9 +5,13 @@ import {
   Check,
   ChevronDown,
   Download,
+  GitFork,
   MessageCircle,
   MessageSquarePlus,
+  MoreHorizontal,
+  Pencil,
   Plus,
+  RefreshCw,
   Search,
   Send,
   Settings2,
@@ -30,6 +34,7 @@ import {
   MultiSelect,
   Select,
   Switch,
+  Textarea,
   Tooltip,
 } from "@/components/ui";
 import { api } from "@/lib/client";
@@ -86,7 +91,10 @@ export function CharacterChatWorkspace({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [deleteSession, setDeleteSession] = useState<CharacterChatSession | null>(null);
+  const [deleteChatId, setDeleteChatId] = useState<string | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<CharacterChatMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<CharacterChatMessage | null>(null);
+  const [messageDraft, setMessageDraft] = useState("");
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [userCharacterId, setUserCharacterId] = useState<string | null>(null);
   const [createContext, setCreateContext] = useState<CharacterChatContextSettings>(emptyContext);
@@ -201,6 +209,30 @@ export function CharacterChatWorkspace({
     onError: (error) => toast.error(error.message),
   });
 
+  const removeChat = useMutation({
+    mutationFn: (chatId: string) => api(`/api/chats/${chatId}`, { method: "DELETE" }),
+    onSuccess: (_result, chatId) => {
+      const remaining = (chats.data ?? []).filter((chat) => chat.id !== chatId);
+      client.setQueryData(["character-chats", projectId], remaining);
+      client.removeQueries({ queryKey: ["character-chat", chatId] });
+      setDeleteChatId(null);
+      setSelectedChatId(remaining[0]?.id ?? null);
+      setSelectedSessionId(null);
+      setComposer("");
+      setComposerMentions([]);
+      setMention(null);
+      setOptimisticAuthor(null);
+      setStreamingMessages([]);
+      setQuickOpen(false);
+      router.replace(
+        `/projects/${projectId}/chats${remaining[0] ? `?chat=${encodeURIComponent(remaining[0].id)}` : ""}`,
+        { scroll: false },
+      );
+      client.invalidateQueries({ queryKey: ["character-chats", projectId] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const removeSession = useMutation({
     mutationFn: (session: CharacterChatSession) =>
       api(`/api/chat-sessions/${session.id}`, { method: "DELETE" }),
@@ -217,7 +249,11 @@ export function CharacterChatWorkspace({
   });
 
   const sendTurn = useMutation({
-    mutationFn: async (body: { content?: string; characterIds?: string[] }) => {
+    mutationFn: async (body: {
+      content?: string;
+      characterIds?: string[];
+      regenerateMessageId?: string;
+    }) => {
       if (!activeSessionId) throw new Error(t("sessionRequired"));
       const controller = new AbortController();
       sendController.current = controller;
@@ -364,6 +400,37 @@ export function CharacterChatWorkspace({
     onError: (error) => toast.error(error.message),
   });
 
+  const editMessage = useMutation({
+    mutationFn: ({ id, content }: { id: string; content: string }) =>
+      api(`/api/chat-messages/${id}`, { method: "PATCH", body: JSON.stringify({ content }) }),
+    onSuccess: () => {
+      setEditingMessage(null);
+      client.invalidateQueries({ queryKey: ["character-chat", activeChatId] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const forkMessage = useMutation({
+    mutationFn: (message: CharacterChatMessage) =>
+      api<CharacterChatSession>(`/api/chat-messages/${message.id}/fork`, { method: "POST" }),
+    onSuccess: (session) => {
+      setSelectedSessionId(session.id);
+      client.invalidateQueries({ queryKey: ["character-chat", activeChatId] });
+      client.invalidateQueries({ queryKey: ["character-chats", projectId] });
+      toast.success(t("forkCreated"));
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const selectSwipe = useMutation({
+    mutationFn: ({ id, index }: { id: string; index: number }) =>
+      api(`/api/chat-messages/${id}/swipe`, { method: "PATCH", body: JSON.stringify({ index }) }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ["character-chat", activeChatId] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const filteredChats = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return (chats.data ?? []).filter(
@@ -416,7 +483,12 @@ export function CharacterChatWorkspace({
   };
 
   const submit = () => {
-    if ((!composer.trim() && !composerMentions.length) || sendTurn.isPending) return;
+    if (
+      (!composer.trim() && !composerMentions.length) ||
+      sendTurn.isPending ||
+      selectSwipe.isPending
+    )
+      return;
     const expressions = composerMentions.map((item) =>
       item.id === null ? "<mention/>" : `<mention>${item.name}</mention>`,
     );
@@ -593,31 +665,24 @@ export function CharacterChatWorkspace({
                     <Download className="size-4" />
                   </Button>
                 </Tooltip>
-                <Tooltip label={t("deleteSession")}>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={
-                      sendTurn.isPending ||
-                      detail.data.sessions.length <= 1 ||
-                      !detail.data.activeSessionId
-                    }
-                    onClick={() =>
-                      setDeleteSession(
-                        detail.data?.sessions.find(
-                          (session) => session.id === detail.data?.activeSessionId,
-                        ) ?? null,
-                      )
-                    }
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </Tooltip>
                 <Tooltip label={t("chatSettings")}>
                   <Button size="icon" variant="ghost" onClick={openSettings}>
                     <Settings2 className="size-4" />
                   </Button>
                 </Tooltip>
+                <ChatMoreActions
+                  key={activeChatId}
+                  disabled={sendTurn.isPending || removeChat.isPending || removeSession.isPending}
+                  sessionDisabled={detail.data.sessions.length <= 1 || !detail.data.activeSessionId}
+                  onDeleteSession={() =>
+                    setDeleteSession(
+                      detail.data?.sessions.find(
+                        (session) => session.id === detail.data?.activeSessionId,
+                      ) ?? null,
+                    )
+                  }
+                  onDeleteChat={() => setDeleteChatId(activeChatId)}
+                />
               </div>
             </header>
             <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto bg-zinc-50/60 px-6 py-6">
@@ -635,18 +700,46 @@ export function CharacterChatWorkspace({
                     </p>
                   </div>
                 ) : null}
-                {detail.data.messages.map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    members={detail.data!.members}
-                    authorLabel={detail.data!.userCharacter?.name ?? t("author")}
-                    authorInitial={detail.data!.userCharacter?.name.slice(0, 1)}
-                    allLabel={t("everyone")}
-                    deleteLabel={common("delete")}
-                    onDelete={() => setDeleteMessage(message)}
-                  />
-                ))}
+                {detail.data.messages
+                  .filter((message) => !streamingMessages.some((item) => item.id === message.id))
+                  .map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      members={detail.data!.members}
+                      authorLabel={detail.data!.userCharacter?.name ?? t("author")}
+                      authorInitial={detail.data!.userCharacter?.name.slice(0, 1)}
+                      allLabel={t("everyone")}
+                      deleteLabel={common("delete")}
+                      onDelete={() => setDeleteMessage(message)}
+                      onEdit={() => {
+                        setEditingMessage(message);
+                        setMessageDraft(message.content);
+                      }}
+                      onFork={() => forkMessage.mutate(message)}
+                      onRegenerate={
+                        message.id === detail.data!.messages.at(-1)?.id &&
+                        message.role === "character" &&
+                        !optimisticAuthor &&
+                        !sendTurn.isPending
+                          ? () => sendTurn.mutate({ regenerateMessageId: message.id })
+                          : undefined
+                      }
+                      onSwipe={
+                        message.id === detail.data!.messages.at(-1)?.id &&
+                        !optimisticAuthor &&
+                        !sendTurn.isPending
+                          ? (index) => selectSwipe.mutate({ id: message.id, index })
+                          : undefined
+                      }
+                      actionsDisabled={
+                        sendTurn.isPending ||
+                        forkMessage.isPending ||
+                        editMessage.isPending ||
+                        selectSwipe.isPending
+                      }
+                    />
+                  ))}
                 {optimisticAuthor &&
                 !detail.data.messages.some((message) => message.id === optimisticAuthor.id) ? (
                   <MessageBubble
@@ -754,7 +847,9 @@ export function CharacterChatWorkspace({
                         key={member.id}
                         type="button"
                         disabled={sendTurn.isPending}
-                        onClick={() => sendTurn.mutate({ characterIds: [member.id] })}
+                        onClick={() =>
+                          !selectSwipe.isPending && sendTurn.mutate({ characterIds: [member.id] })
+                        }
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-100 disabled:opacity-50"
                       >
                         <span className="flex size-7 items-center justify-center rounded-full bg-zinc-100 font-medium text-xs">
@@ -878,7 +973,9 @@ export function CharacterChatWorkspace({
                     ) : (
                       <Button
                         size="icon"
-                        disabled={!composer.trim() && !composerMentions.length}
+                        disabled={
+                          selectSwipe.isPending || (!composer.trim() && !composerMentions.length)
+                        }
                         onClick={submit}
                         aria-label={t("send")}
                       >
@@ -1026,6 +1123,49 @@ export function CharacterChatWorkspace({
         loading={removeSession.isPending}
       />
       <ConfirmDialog
+        open={Boolean(deleteChatId)}
+        onOpenChange={(open) => !open && !removeChat.isPending && setDeleteChatId(null)}
+        title={t("deleteChatTitle")}
+        description={t("deleteChatDescription")}
+        onConfirm={() => deleteChatId && !removeChat.isPending && removeChat.mutate(deleteChatId)}
+        loading={removeChat.isPending}
+      />
+      <Modal
+        open={Boolean(editingMessage)}
+        onOpenChange={(open) => !open && !editMessage.isPending && setEditingMessage(null)}
+        title={t("editMessage")}
+        description={t("editMessageDescription")}
+      >
+        <div className="p-5">
+          <Textarea
+            autoFocus
+            aria-label={t("editMessage")}
+            className="min-h-48"
+            value={messageDraft}
+            disabled={editMessage.isPending}
+            onChange={(event) => setMessageDraft(event.target.value)}
+          />
+        </div>
+        <div className="flex justify-end gap-2 border-zinc-100 border-t p-3">
+          <Button
+            variant="ghost"
+            disabled={editMessage.isPending}
+            onClick={() => setEditingMessage(null)}
+          >
+            {common("cancel")}
+          </Button>
+          <Button
+            loading={editMessage.isPending}
+            disabled={editMessage.isPending || !messageDraft.trim()}
+            onClick={() =>
+              editingMessage && editMessage.mutate({ id: editingMessage.id, content: messageDraft })
+            }
+          >
+            {common("save")}
+          </Button>
+        </div>
+      </Modal>
+      <ConfirmDialog
         open={Boolean(deleteMessage)}
         onOpenChange={(open) => !open && setDeleteMessage(null)}
         title={t("deleteMessageTitle")}
@@ -1039,6 +1179,86 @@ export function CharacterChatWorkspace({
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function ChatMoreActions({
+  disabled,
+  sessionDisabled,
+  onDeleteSession,
+  onDeleteChat,
+}: {
+  disabled: boolean;
+  sessionDisabled: boolean;
+  onDeleteSession: () => void;
+  onDeleteChat: () => void;
+}) {
+  const t = useTranslations("CharacterChat");
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+  return (
+    <div
+      ref={root}
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+          trigger.current?.focus();
+        }
+      }}
+    >
+      <button
+        ref={trigger}
+        type="button"
+        className="focus-ring flex size-8 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 disabled:opacity-40"
+        aria-label={t("moreActions")}
+        title={t("moreActions")}
+        aria-expanded={open && !disabled}
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+      >
+        <MoreHorizontal className="size-4" />
+      </button>
+      {open && !disabled ? (
+        <div
+          role="group"
+          aria-label={t("moreActions")}
+          className="absolute top-10 right-0 z-30 min-w-44 rounded-lg border border-zinc-200 bg-white p-1 shadow-xl"
+        >
+          {[
+            { label: t("deleteSession"), action: onDeleteSession, disabled: sessionDisabled },
+            { label: t("deleteChat"), action: onDeleteChat, disabled: false },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              disabled={item.disabled}
+              onClick={() => {
+                setOpen(false);
+                trigger.current?.focus();
+                item.action();
+              }}
+              className="focus-ring flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-red-600 text-sm hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Trash2 className="size-4" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SessionPicker({
@@ -1056,18 +1276,42 @@ function SessionPicker({
 }) {
   const [open, setOpen] = useState(false);
   const selected = sessions.find((session) => session.id === value) ?? sessions.at(-1);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
   return (
-    <div className="relative">
+    <div
+      ref={root}
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+          trigger.current?.focus();
+        }
+      }}
+    >
       <button
+        ref={trigger}
         type="button"
         disabled={disabled}
+        aria-expanded={open && !disabled}
         onClick={() => setOpen((current) => !current)}
         className="focus-ring flex h-8 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 font-medium text-xs hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {selected ? label(selected.sortOrder) : "—"}
         <ChevronDown className="size-3 text-zinc-400" />
       </button>
-      {open ? (
+      {open && !disabled ? (
         <div className="absolute top-10 right-0 z-30 min-w-40 rounded-lg border border-zinc-200 bg-white p-1 shadow-xl">
           {sessions.map((session) => (
             <button
@@ -1102,6 +1346,11 @@ function MessageBubble({
   allLabel,
   deleteLabel,
   onDelete,
+  onEdit,
+  onFork,
+  onRegenerate,
+  onSwipe,
+  actionsDisabled,
   transient,
   streaming,
 }: {
@@ -1112,11 +1361,24 @@ function MessageBubble({
   allLabel: string;
   deleteLabel: string;
   onDelete?: () => void;
+  onEdit?: () => void;
+  onFork?: () => void;
+  onRegenerate?: () => void;
+  onSwipe?: (index: number) => void;
+  actionsDisabled?: boolean;
   transient?: boolean;
   streaming?: boolean;
 }) {
+  const t = useTranslations("CharacterChat");
   const member = members.find((candidate) => candidate.id === message.characterId);
   const author = message.role === "author";
+  const locale = useLocale();
+  const createdAt = new Date(
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(message.createdAt)
+      ? `${message.createdAt.replace(" ", "T")}Z`
+      : message.createdAt,
+  );
+  const validTime = !Number.isNaN(createdAt.getTime());
   return (
     <div
       className={cn(
@@ -1149,20 +1411,81 @@ function MessageBubble({
           {streaming ? (
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-zinc-700 align-middle" />
           ) : null}
-          {onDelete && !transient ? (
-            <button
-              type="button"
-              onClick={onDelete}
-              aria-label={deleteLabel}
-              className={cn(
-                "absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-zinc-400 opacity-0 transition hover:bg-white hover:text-red-500 group-hover:opacity-100",
-                author ? "-left-10" : "-right-10",
-              )}
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          ) : null}
         </div>
+        {!transient ? (
+          <div
+            className={cn(
+              "pointer-events-none mt-1 flex flex-wrap items-center gap-1 px-1 text-xs text-zinc-500 opacity-0 transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
+              author && "justify-end",
+            )}
+          >
+            {validTime ? (
+              <time
+                dateTime={createdAt.toISOString()}
+                title={createdAt.toLocaleString(locale)}
+                className="mr-2"
+              >
+                {createdAt.toLocaleString(locale, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
+            ) : null}
+            {[
+              { action: onEdit, label: t("editMessage"), Icon: Pencil },
+              { action: onRegenerate, label: t("regenerateMessage"), Icon: RefreshCw },
+              { action: onFork, label: t("forkMessage"), Icon: GitFork },
+              { action: onDelete, label: deleteLabel, Icon: Trash2 },
+            ].map(({ action, label, Icon }) =>
+              action ? (
+                <Tooltip key={label} label={label}>
+                  <button
+                    type="button"
+                    aria-label={label}
+                    disabled={actionsDisabled}
+                    onClick={action}
+                    className={cn(
+                      "focus-ring flex size-8 items-center justify-center rounded-md transition hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40",
+                      Icon === Trash2 && "hover:text-red-600",
+                    )}
+                  >
+                    <Icon className="size-4" />
+                  </button>
+                </Tooltip>
+              ) : null,
+            )}
+            {onSwipe && message.swipeData ? (
+              <span className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label={t("previousSwipe")}
+                  disabled={actionsDisabled || message.swipeData.index === 0}
+                  onClick={() => onSwipe(message.swipeData!.index - 1)}
+                  className="disabled:opacity-40"
+                >
+                  ‹
+                </button>
+                <span>
+                  {message.swipeData.index + 1} / {message.swipeData.options.length}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t("nextSwipe")}
+                  disabled={
+                    actionsDisabled ||
+                    message.swipeData.index === message.swipeData.options.length - 1
+                  }
+                  onClick={() => onSwipe(message.swipeData!.index + 1)}
+                  className="disabled:opacity-40"
+                >
+                  ›
+                </button>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

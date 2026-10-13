@@ -75,6 +75,7 @@ function mapSession(row: Row): CharacterChatSession {
 
 function mapMessage(row: Row): CharacterChatMessage {
   return {
+    swipeData: parseJson(String(row.swipe_data ?? "null"), null),
     id: String(row.id),
     sessionId: String(row.session_id),
     role: row.role === "character" ? "character" : "author",
@@ -173,7 +174,8 @@ export async function loadCharacterChat(
     ? (
         (await conn("character_chat_messages")
           .where({ session_id: activeSession.id })
-          .orderBy("created_at", "asc")) as Row[]
+          .orderBy("created_at", "asc")
+          .orderBy("rowid", "asc")) as Row[]
       ).map(mapMessage)
     : [];
   return {
@@ -303,6 +305,12 @@ export async function createCharacterChatSession(chatId: string): Promise<Charac
   return mapSession((await conn("character_chat_sessions").where({ id }).first()) as Row);
 }
 
+export async function deleteCharacterChat(chatId: string): Promise<void> {
+  const conn = await getDb();
+  if (!(await conn("character_chats").where({ id: chatId }).delete()))
+    throw new ApiError("chatNotFound", 404);
+}
+
 export async function deleteCharacterChatSession(sessionId: string): Promise<void> {
   const conn = await getDb();
   const session = (await conn("character_chat_sessions").where({ id: sessionId }).first()) as
@@ -325,6 +333,88 @@ export async function deleteCharacterChatMessage(messageId: string): Promise<voi
   const conn = await getDb();
   if (!(await conn("character_chat_messages").where({ id: messageId }).delete()))
     throw new ApiError("chatMessageNotFound", 404);
+}
+
+export async function updateCharacterChatMessage(
+  messageId: string,
+  content: string,
+): Promise<void> {
+  if (typeof content !== "string" || !content.trim()) throw new ApiError("messageRequired");
+  const conn = await getDb();
+  await conn.transaction(async (trx) => {
+    const row = await trx("character_chat_messages").where({ id: messageId }).first();
+    if (!row) throw new ApiError("chatMessageNotFound", 404);
+    const swipe = mapMessage(row).swipeData;
+    if (swipe) swipe.options[swipe.index] = content;
+    await trx("character_chat_messages")
+      .where({ id: messageId })
+      .update({
+        content,
+        swipe_data: swipe ? JSON.stringify(swipe) : null,
+      });
+  });
+}
+
+export async function selectCharacterChatSwipe(messageId: string, index: number): Promise<void> {
+  const conn = await getDb();
+  await conn.transaction(async (trx) => {
+    const row = await trx("character_chat_messages").where({ id: messageId }).first();
+    if (!row) throw new ApiError("chatMessageNotFound", 404);
+    const last = await trx("character_chat_messages")
+      .where({ session_id: row.session_id })
+      .orderBy("created_at", "desc")
+      .orderBy("rowid", "desc")
+      .first();
+    const swipe = mapMessage(row).swipeData;
+    if (
+      last.id !== row.id ||
+      !swipe ||
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= swipe.options.length
+    )
+      throw new ApiError("chatSwipeUnavailable", 409);
+    await trx("character_chat_messages")
+      .where({ id: messageId })
+      .update({
+        content: swipe.options[index],
+        swipe_data: JSON.stringify({ ...swipe, index }),
+      });
+  });
+}
+
+export async function forkCharacterChatMessage(messageId: string): Promise<CharacterChatSession> {
+  const conn = await getDb();
+  return conn.transaction(async (trx) => {
+    const message = await trx("character_chat_messages").where({ id: messageId }).first();
+    if (!message) throw new ApiError("chatMessageNotFound", 404);
+    const source = await trx("character_chat_sessions").where({ id: message.session_id }).first();
+    const messages = await trx("character_chat_messages")
+      .where({ session_id: source.id })
+      .orderBy("created_at", "asc")
+      .orderBy("rowid", "asc");
+    const cutoff = messages.findIndex((item) => item.id === messageId);
+    const last = await trx("character_chat_sessions")
+      .where({ chat_id: source.chat_id })
+      .max({ value: "sort_order" })
+      .first();
+    const id = newId();
+    await trx("character_chat_sessions").insert({
+      id,
+      chat_id: source.chat_id,
+      sort_order: Number(last?.value ?? 0) + 1,
+    });
+    for (const item of messages.slice(0, cutoff + 1)) {
+      await trx("character_chat_messages").insert({
+        ...item,
+        id: newId(),
+        session_id: id,
+        swipe_data: null,
+      });
+    }
+    await trx("character_chats").where({ id: source.chat_id }).update({ updated_at: trx.fn.now() });
+    return mapSession(await trx("character_chat_sessions").where({ id }).first());
+  });
 }
 
 interface ResolvedChatModel {
@@ -550,9 +640,19 @@ export interface CharacterChatTurnEvents {
   onCharacterComplete?: (message: CharacterChatMessage) => void | Promise<void>;
 }
 
+async function appendChatMessage(row: Row) {
+  const conn = await getDb();
+  await conn.transaction(async (trx) => {
+    await trx("character_chat_messages")
+      .where({ session_id: row.session_id })
+      .update({ swipe_data: null });
+    await trx("character_chat_messages").insert(row);
+  });
+}
+
 export async function runCharacterChatTurn(
   sessionId: string,
-  body: { content?: string; characterIds?: string[] },
+  body: { content?: string; characterIds?: string[]; regenerateMessageId?: string },
   signal?: AbortSignal,
   events: CharacterChatTurnEvents = {},
 ): Promise<CharacterChatDetail> {
@@ -563,6 +663,48 @@ export async function runCharacterChatTurn(
     | undefined;
   if (!sessionRow) throw new ApiError("chatSessionNotFound", 404);
   const chat = await loadCharacterChat(String(sessionRow.chat_id), sessionId);
+  if (body.regenerateMessageId) {
+    const last = chat.messages.at(-1);
+    const character = chat.members.find((member) => member.id === last?.characterId);
+    if (!last || last.id !== body.regenerateMessageId || last.role !== "character" || !character)
+      throw new ApiError("chatSwipeUnavailable", 409);
+    const resolved = await resolveChatModel(chat.projectId);
+    const context = await buildChatContext(chat, resolved.project, resolved.settings);
+    await events.onCharacterStart?.({ ...last, content: "" });
+    const response = await generateCharacterResponse(
+      resolved,
+      chat,
+      character,
+      chat.messages.slice(0, -1),
+      context,
+      signal,
+      (text) => events.onCharacterDelta?.(last.id, text),
+    );
+    signal?.throwIfAborted();
+    if (!response.trim()) throw new ApiError("emptyModelResponse");
+    await conn.transaction(async (trx) => {
+      const current = await trx("character_chat_messages")
+        .where({ session_id: sessionId })
+        .orderBy("created_at", "desc")
+        .orderBy("rowid", "desc")
+        .first();
+      if (
+        !current ||
+        current.id !== last.id ||
+        current.content !== last.content ||
+        current.swipe_data !== (last.swipeData ? JSON.stringify(last.swipeData) : null)
+      )
+        throw new ApiError("chatSwipeUnavailable", 409);
+      const options = [...(last.swipeData?.options ?? [last.content]), response];
+      await trx("character_chat_messages")
+        .where({ id: last.id })
+        .update({
+          content: response,
+          swipe_data: JSON.stringify({ options, index: options.length - 1 }),
+        });
+    });
+    return loadCharacterChat(chat.id, sessionId);
+  }
   const content = body.content?.trim() ?? "";
   const allowedIds = new Set(chat.members.map((member) => member.id));
   const directIds = uniqueStrings(body.characterIds).filter((id) => allowedIds.has(id));
@@ -579,7 +721,7 @@ export async function runCharacterChatTurn(
       content,
       createdAt: new Date().toISOString(),
     };
-    await conn("character_chat_messages").insert({
+    await appendChatMessage({
       id: authorMessage.id,
       session_id: sessionId,
       role: "author",
@@ -641,7 +783,7 @@ export async function runCharacterChatTurn(
       content: response,
       createdAt,
     };
-    await conn("character_chat_messages").insert({
+    await appendChatMessage({
       id: characterMessage.id,
       session_id: sessionId,
       role: "character",

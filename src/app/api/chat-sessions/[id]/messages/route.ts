@@ -11,7 +11,11 @@ function isAbortError(error: unknown) {
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const body = await jsonBody<{ content?: string; characterIds?: string[] }>(request);
+    const body = await jsonBody<{
+      content?: string;
+      characterIds?: string[];
+      regenerateMessageId?: string;
+    }>(request);
     const encoder = new TextEncoder();
     const abortController = new AbortController();
     const abortUpstream = () => abortController.abort(request.signal.reason);

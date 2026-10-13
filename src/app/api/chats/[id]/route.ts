@@ -1,8 +1,22 @@
 import { fail, jsonBody, ok } from "@/lib/api";
-import { loadCharacterChat, updateCharacterChatContext } from "@/lib/character-chat";
+import {
+  deleteCharacterChat,
+  loadCharacterChat,
+  updateCharacterChatContext,
+} from "@/lib/character-chat";
 import type { CharacterChatContextSettings } from "@/lib/types";
 
 export const runtime = "nodejs";
+
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    await deleteCharacterChat(id);
+    return ok({ success: true });
+  } catch (error) {
+    return fail(error);
+  }
+}
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

@@ -406,6 +406,7 @@ export interface CharacterChatSession {
 }
 
 export interface CharacterChatMessage {
+  swipeData?: { options: string[]; index: number } | null;
   id: string;
   sessionId: string;
   role: "author" | "character";
